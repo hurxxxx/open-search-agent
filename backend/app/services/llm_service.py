@@ -1,16 +1,19 @@
 from typing import List, Dict, Any
 import json
 import logging
+import traceback
 from openai import OpenAI
 
 from app.core.config import settings
 
+# 로깅 레벨 설정
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 class LLMService:
     def __init__(self):
         self.client = OpenAI(api_key=settings.OPENAI_API_KEY)
-        self.model = "gpt-4"  # Default model
+        self.model = settings.OPENAI_MODEL  # Get model from settings
 
     def decompose_prompt(self, prompt: str) -> List[str]:
         """
@@ -22,12 +25,21 @@ class LLMService:
                 {"role": "user", "content": f"Please decompose the following prompt into 3-5 search queries that would help gather information to answer it: '{prompt}'"}
             ]
 
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                temperature=0.3,
-                max_tokens=500
-            )
+            # Set base parameters
+            params = {
+                "model": self.model,
+                "messages": messages
+            }
+
+            # Add model-specific parameters
+            if self.model.startswith("o4-"):
+                params["max_completion_tokens"] = 500
+                # o4 models don't support temperature parameter
+            else:
+                params["max_tokens"] = 500
+                params["temperature"] = 0.3
+
+            response = self.client.chat.completions.create(**params)
 
             # Extract the search queries from the response
             content = response.choices[0].message.content
@@ -80,12 +92,21 @@ class LLMService:
                 {"role": "user", "content": f"Original prompt: {prompt}\n\nSearch results:\n{formatted_results}\n\nAre these search results sufficient to answer the original prompt? If not, what additional search queries would you suggest? Respond in JSON format with the following structure: {{\"sufficient\": boolean, \"reasoning\": \"your reasoning\", \"additional_queries\": [\"query1\", \"query2\"]}}"}
             ]
 
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                temperature=0.3,
-                max_tokens=1000
-            )
+            # Set base parameters
+            params = {
+                "model": self.model,
+                "messages": messages
+            }
+
+            # Add model-specific parameters
+            if self.model.startswith("o4-"):
+                params["max_completion_tokens"] = 1000
+                # o4 models don't support temperature parameter
+            else:
+                params["max_tokens"] = 1000
+                params["temperature"] = 0.3
+
+            response = self.client.chat.completions.create(**params)
 
             content = response.choices[0].message.content
 
@@ -124,29 +145,83 @@ class LLMService:
         Generate a user-friendly presentation of search results without modifying or summarizing the content
         """
         try:
+            # Check if we have any search results
+            if not all_search_results:
+                logger.warning("No search results provided to generate_report")
+                return "No search results were found for your query. Please try a different search term or search provider."
+
+            # Log the search results for debugging
+            logger.info(f"Generating report for prompt: {prompt}")
+            logger.info(f"Number of search result steps: {len(all_search_results)}")
+
             # Format all search results for the LLM
             formatted_results = ""
+            total_results = 0
+
             for i, step in enumerate(all_search_results):
-                formatted_results += f"Search Query {i+1}: {step.get('query', 'N/A')}\n"
-                for j, result in enumerate(step.get('results', [])):
+                query = step.get('query', 'N/A')
+                results = step.get('results', [])
+
+                logger.info(f"Search Query {i+1}: {query} - Number of results: {len(results)}")
+
+                formatted_results += f"Search Query {i+1}: {query}\n"
+
+                if not results:
+                    formatted_results += "  No results found for this query.\n\n"
+                    continue
+
+                total_results += len(results)
+
+                for j, result in enumerate(results):
                     formatted_results += f"  Result {j+1}:\n"
                     formatted_results += f"  Title: {result.get('title', 'N/A')}\n"
                     formatted_results += f"  Link: {result.get('link', 'N/A')}\n"
                     formatted_results += f"  Snippet: {result.get('snippet', 'N/A')}\n\n"
 
+            # If we have no actual results across all queries
+            if total_results == 0:
+                logger.warning("No actual search results found in any query")
+                return "Search was performed but no results were found. Please try different search terms or a different search provider."
+
+            # Log the formatted results for debugging (truncated to avoid excessive logging)
+            logger.info(f"Formatted results preview (first 500 chars): {formatted_results[:500]}...")
+
             messages = [
-                {"role": "system", "content": "You are an AI assistant that organizes search results in a user-friendly format. DO NOT modify, summarize, or add to the content of the search results. Your task is to present the information exactly as it appears in the search results, but in a well-structured format that is easy to read. Include all the original information and cite the sources properly. Do not make up information that is not in the search results."},
+                {"role": "system", "content": "You are an AI assistant that organizes search results in a user-friendly format. DO NOT modify, summarize, or add to the content of the search results. Your task is to present the information exactly as it appears in the search results, but in a well-structured format that is easy to read. Include all the original information and cite the sources properly. Do not make up information that is not in the search results. If there are no search results or insufficient information, clearly state this fact."},
                 {"role": "user", "content": f"Original prompt: {prompt}\n\nSearch results:\n{formatted_results}\n\nPlease organize these search results in a user-friendly format that directly answers the original prompt. Present the information exactly as it appears in the search results without modifying or summarizing the content. Include proper citations to the sources."}
             ]
 
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                temperature=0.3,  # Lower temperature for more deterministic output
-                max_tokens=2000
-            )
+            # Set base parameters
+            params = {
+                "model": self.model,
+                "messages": messages
+            }
 
-            return response.choices[0].message.content
+            # Add model-specific parameters
+            if self.model.startswith("o4-"):
+                params["max_completion_tokens"] = 2000
+                # o4 models don't support temperature parameter
+            else:
+                params["max_tokens"] = 2000
+                params["temperature"] = 0.3  # Lower temperature for more deterministic output
+
+            response = self.client.chat.completions.create(**params)
+
+            report_content = response.choices[0].message.content
+
+            # Log a preview of the generated report
+            logger.info(f"Generated report preview (first 500 chars): {report_content[:500]}...")
+
+            return report_content
         except Exception as e:
+            error_trace = traceback.format_exc()
             logger.error(f"Error in generate_report: {str(e)}")
+            logger.error(f"Traceback: {error_trace}")
+
+            # 오류 유형에 따른 상세 로깅
+            if "maximum context length" in str(e).lower():
+                logger.error(f"Context length exceeded. Formatted results length: {len(formatted_results)}")
+                logger.error(f"Total tokens in messages: approximately {len(str(messages)) / 4} tokens")
+                return f"Error generating report: The search results are too large to process. Please try a more specific query or use fewer search terms."
+
             return f"Error generating report: {str(e)}"

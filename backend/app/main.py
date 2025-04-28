@@ -1,9 +1,27 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
+import logging
+import sys
 
 from app.api.routes import router as api_router
 from app.core.config import settings
+
+# 로깅 설정
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+
+# 외부 라이브러리 로깅 레벨 조정
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("uvicorn").setLevel(logging.INFO)
+logging.getLogger("asyncio").setLevel(logging.WARNING)
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title=settings.PROJECT_NAME,

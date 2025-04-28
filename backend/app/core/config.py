@@ -20,6 +20,7 @@ class Settings(BaseSettings):
 
     # OpenAI settings
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
+    OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "o4-mini")
 
     # Search provider selection
     SEARCH_PROVIDER: Literal["duckduckgo", "google", "searxng", "tavily", "serper", "brave"] = os.getenv("SEARCH_PROVIDER", "duckduckgo")

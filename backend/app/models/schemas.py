@@ -34,3 +34,9 @@ class AgentResponse(BaseModel):
     search_steps: List[AgentSearchStep]
     final_report: str
     sources: List[Dict[str, Any]]
+
+
+class StreamingSearchResponse(BaseModel):
+    """Model for streaming search responses"""
+    event: str  # Event type: "search_start", "search_query", "search_results", "report_chunk", "search_complete"
+    data: Dict[str, Any]  # Event-specific data

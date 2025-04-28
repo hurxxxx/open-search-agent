@@ -1,11 +1,13 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Web Search Agent</title>
     <link rel="stylesheet" href="styles.css">
 </head>
+
 <body>
     <div class="container">
         <header>
@@ -18,18 +20,8 @@
                 <form id="search-form">
                     <div class="form-group">
                         <label for="prompt">What would you like to know?</label>
-                        <textarea id="prompt" name="prompt" rows="4" placeholder="Enter your question here..."></textarea>
-                    </div>
-                    <div class="form-group search-options">
-                        <label for="search-provider">Search Provider:</label>
-                        <select id="search-provider" name="search-provider">
-                            <option value="duckduckgo" selected>DuckDuckGo</option>
-                            <option value="google">Google</option>
-                            <option value="searxng">SearXNG</option>
-                            <option value="tavily">Tavily</option>
-                            <option value="serper">Serper</option>
-                            <option value="brave">Brave</option>
-                        </select>
+                        <textarea id="prompt" name="prompt" rows="4"
+                            placeholder="Enter your question here..."></textarea>
                     </div>
                     <button type="submit" id="search-button">Search</button>
                 </form>
@@ -38,7 +30,8 @@
             <section class="auth-section">
                 <div class="form-group">
                     <label for="api-key">API Key for Bearer Authentication</label>
-                    <input type="text" id="api-key" name="api-key" placeholder="Enter your API key" value="test_api_key_123">
+                    <input type="text" id="api-key" name="api-key" placeholder="Enter your API key"
+                        value="test_api_key_123">
                     <button id="save-api-key-button">Save API Key</button>
                 </div>
                 <div id="api-key-status"></div>
@@ -74,4 +67,5 @@
 
     <script src="script.js"></script>
 </body>
+
 </html>

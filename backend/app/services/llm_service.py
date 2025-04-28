@@ -1,8 +1,9 @@
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional, AsyncGenerator
 import json
 import logging
 import traceback
-from openai import OpenAI
+import asyncio
+from openai import OpenAI, AsyncOpenAI
 
 from app.core.config import settings
 
@@ -13,6 +14,7 @@ logger.setLevel(logging.DEBUG)
 class LLMService:
     def __init__(self):
         self.client = OpenAI(api_key=settings.OPENAI_API_KEY)
+        self.async_client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
         self.model = settings.OPENAI_MODEL  # Get model from settings
 
     def decompose_prompt(self, prompt: str) -> List[str]:
@@ -140,9 +142,81 @@ class LLMService:
                 "additional_queries": []
             }
 
+    def summarize_search_result(self, prompt: str, query: str, result: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Summarize a single search result to extract only the relevant information
+        Uses a smaller model (o4-mini) to reduce costs
+        """
+        try:
+            # Extract result information
+            title = result.get('title', 'N/A')
+            link = result.get('link', 'N/A')
+            snippet = result.get('snippet', 'N/A')
+
+            # Create system prompt for summarization
+            system_prompt = """
+            You are an AI assistant that extracts and summarizes only the relevant information from search results.
+            Your task is to analyze a search result and extract only the information that is directly relevant to the original query.
+            Focus on key facts, dates, events, and developments that answer the query.
+            Be concise but preserve all important information.
+            Do not add any information that is not in the original snippet.
+            """
+
+            # Create user prompt with the search result
+            user_prompt = f"""
+            Original prompt: {prompt}
+            Search query: {query}
+
+            Search result:
+            Title: {title}
+            Link: {link}
+            Snippet: {snippet}
+
+            Please extract and summarize only the information that is directly relevant to the original prompt.
+            Focus on key facts, dates, events, and developments.
+            Be concise but preserve all important information.
+            Your summary should be no more than 3-4 sentences.
+            """
+
+            # Call the LLM to summarize the result
+            # Use o4-mini for cost efficiency
+            params = {
+                "model": "o4-mini",  # Use a smaller model for summarization
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ]
+            }
+
+            # Add model-specific parameters
+            params["max_completion_tokens"] = 300  # Smaller token limit for summarization
+
+            # Make the API call
+            response = self.client.chat.completions.create(**params)
+
+            # Extract the summary from the response
+            summary = response.choices[0].message.content.strip()
+
+            # Create a new result with the summary
+            summarized_result = {
+                'title': title,
+                'link': link,
+                'original_snippet': snippet,
+                'summary': summary,
+                'snippet': summary  # Add the summary as snippet to maintain compatibility with the model
+            }
+
+            logger.info(f"Summarized result: {title[:30]}...")
+            return summarized_result
+
+        except Exception as e:
+            logger.error(f"Error summarizing search result: {e}")
+            # Return the original result if summarization fails
+            return result
+
     def generate_report(self, prompt: str, all_search_results: List[Dict[str, Any]]) -> str:
         """
-        Generate a user-friendly presentation of search results without modifying or summarizing the content
+        Generate a user-friendly presentation of search results using summarized content
         """
         try:
             # Check if we have any search results
@@ -174,9 +248,23 @@ class LLMService:
 
                 for j, result in enumerate(results):
                     formatted_results += f"  Result {j+1}:\n"
-                    formatted_results += f"  Title: {result.get('title', 'N/A')}\n"
-                    formatted_results += f"  Link: {result.get('link', 'N/A')}\n"
-                    formatted_results += f"  Snippet: {result.get('snippet', 'N/A')}\n\n"
+
+                    # Use the summary if available, otherwise use the original snippet
+                    title = result.get('title', 'N/A')
+                    link = result.get('link', 'N/A')
+
+                    # Check if this result has been summarized
+                    if 'summary' in result:
+                        content = result.get('summary', 'N/A')
+                        formatted_results += f"  Title: {title}\n"
+                        formatted_results += f"  Link: {link}\n"
+                        formatted_results += f"  Summary: {content}\n\n"
+                    else:
+                        # If not summarized, use the original snippet
+                        snippet = result.get('snippet', 'N/A')
+                        formatted_results += f"  Title: {title}\n"
+                        formatted_results += f"  Link: {link}\n"
+                        formatted_results += f"  Snippet: {snippet}\n\n"
 
             # If we have no actual results across all queries
             if total_results == 0:
@@ -187,8 +275,8 @@ class LLMService:
             logger.info(f"Formatted results preview (first 500 chars): {formatted_results[:500]}...")
 
             messages = [
-                {"role": "system", "content": "You are an AI assistant that organizes search results in a user-friendly format. DO NOT modify, summarize, or add to the content of the search results. Your task is to present the information exactly as it appears in the search results, but in a well-structured format that is easy to read. Include all the original information and cite the sources properly. Do not make up information that is not in the search results. If there are no search results or insufficient information, clearly state this fact."},
-                {"role": "user", "content": f"Original prompt: {prompt}\n\nSearch results:\n{formatted_results}\n\nPlease organize these search results in a user-friendly format that directly answers the original prompt. Present the information exactly as it appears in the search results without modifying or summarizing the content. Include proper citations to the sources."}
+                {"role": "system", "content": "You are an AI assistant that organizes search results in a user-friendly format. Your task is to create a comprehensive report that answers the original prompt based on the search results provided. The search results have already been summarized to extract the most relevant information. Organize the information in a logical structure with clear headings and sections. Combine related information from different sources. Include proper citations to the sources. Do not add any significant information that is not in the search results."},
+                {"role": "user", "content": f"Original prompt: {prompt}\n\nSearch results:\n{formatted_results}\n\nPlease create a comprehensive report that answers the original prompt based on these search results. Organize the information in a logical structure with clear headings and sections. Combine related information from different sources. Include proper citations to the sources."}
             ]
 
             # Set base parameters
@@ -199,10 +287,9 @@ class LLMService:
 
             # Add model-specific parameters
             if self.model.startswith("o4-"):
-                params["max_completion_tokens"] = 2000
                 # o4 models don't support temperature parameter
+                pass
             else:
-                params["max_tokens"] = 2000
                 params["temperature"] = 0.3  # Lower temperature for more deterministic output
 
             response = self.client.chat.completions.create(**params)
@@ -225,3 +312,95 @@ class LLMService:
                 return f"Error generating report: The search results are too large to process. Please try a more specific query or use fewer search terms."
 
             return f"Error generating report: {str(e)}"
+
+    async def generate_report_stream(self, prompt: str, all_search_results: List[Dict[str, Any]]) -> AsyncGenerator[str, None]:
+        """
+        Generate a comprehensive report based on search results with streaming response
+        Yields chunks of the report as they are generated
+        """
+        try:
+            logger.info(f"Generating streaming report for prompt: {prompt}")
+            logger.info(f"Number of search result steps: {len(all_search_results)}")
+
+            # Format the search results for the LLM
+            formatted_results = ""
+            for i, step in enumerate(all_search_results):
+                query = step.get("query", "Unknown query")
+                results = step.get("results", [])
+
+                formatted_results += f"\n\nSEARCH QUERY {i+1}: {query}\n"
+                formatted_results += f"Number of results: {len(results)}\n\n"
+
+                for j, result in enumerate(results):
+                    title = result.get("title", "No title")
+                    link = result.get("link", "No link")
+                    snippet = result.get("snippet", "No content")
+
+                    formatted_results += f"Result {j+1}:\n"
+                    formatted_results += f"Title: {title}\n"
+                    formatted_results += f"URL: {link}\n"
+                    formatted_results += f"Content: {snippet}\n\n"
+
+            logger.info(f"Formatted {len(all_search_results)} search steps with a total of {sum(len(step.get('results', [])) for step in all_search_results)} results")
+
+            # Create the messages for the LLM
+            messages = [
+                {
+                    "role": "system",
+                    "content": """You are a helpful research assistant that generates comprehensive reports based on search results.
+                    Your task is to analyze the search results and create a well-structured, informative report that addresses the user's query.
+                    Include relevant information from the search results and cite your sources.
+                    Format your report with clear sections, bullet points where appropriate, and a conclusion.
+                    Do not include any personal opinions or information not found in the search results."""
+                },
+                {
+                    "role": "user",
+                    "content": f"""Please generate a comprehensive report based on the following search query and results:
+
+USER QUERY: {prompt}
+
+SEARCH RESULTS:
+{formatted_results}
+
+Create a well-structured report that addresses the query comprehensively. Include all relevant information from the search results.
+Format the report with clear sections, headings, and bullet points where appropriate.
+Cite sources by referring to the titles or URLs of the search results.
+End with a conclusion that summarizes the key findings."""
+                }
+            ]
+
+            # Set base parameters
+            params = {
+                "model": self.model,
+                "messages": messages,
+                "stream": True  # Enable streaming
+            }
+
+            # Add model-specific parameters
+            if self.model.startswith("o4-"):
+                # o4 models don't support temperature parameter
+                pass
+            else:
+                params["temperature"] = 0.3  # Lower temperature for more deterministic output
+
+            # Create a streaming completion
+            stream = await self.async_client.chat.completions.create(**params)
+
+            # Process the stream
+            async for chunk in stream:
+                if chunk.choices and chunk.choices[0].delta.content:
+                    content = chunk.choices[0].delta.content
+                    yield content
+
+        except Exception as e:
+            error_trace = traceback.format_exc()
+            logger.error(f"Error in generate_report_stream: {str(e)}")
+            logger.error(f"Traceback: {error_trace}")
+
+            # 오류 유형에 따른 상세 로깅
+            if "maximum context length" in str(e).lower():
+                logger.error(f"Context length exceeded. Formatted results length: {len(formatted_results)}")
+                logger.error(f"Total tokens in messages: approximately {len(str(messages)) / 4} tokens")
+                yield f"Error generating report: The search results are too large to process. Please try a more specific query or use fewer search terms."
+            else:
+                yield f"Error generating report: {str(e)}"

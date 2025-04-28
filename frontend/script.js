@@ -1,11 +1,11 @@
 // Configuration
 const API_BASE_URL = 'http://localhost:8000/api/v1';
 let apiKey = 'test_api_key_123'; // Default API key matching the one in backend/.env
+// Last updated: 2025-04-28 22:50:00
 
 // DOM Elements
 const searchForm = document.getElementById('search-form');
 const promptInput = document.getElementById('prompt');
-const searchProviderSelect = document.getElementById('search-provider');
 const searchButton = document.getElementById('search-button');
 const loginButton = document.getElementById('login-button');
 const usernameInput = document.getElementById('username');
@@ -23,6 +23,8 @@ const sourcesList = document.getElementById('sources-list');
 
 // Event Listeners
 document.addEventListener('DOMContentLoaded', () => {
+    console.log('DOM loaded - script.js updated at 2025-04-28 23:00:00');
+
     searchForm.addEventListener('submit', handleSearch);
     saveApiKeyButton.addEventListener('click', handleSaveApiKey);
 
@@ -82,20 +84,31 @@ async function handleSearch(event) {
     // Show loading state
     resultsSection.style.display = 'block';
     loadingElement.style.display = 'block';
-    resultsElement.style.display = 'none';
+    resultsElement.style.display = 'block';
+
+    // Clear previous results
+    reportElement.innerHTML = '';
+    stepsContainer.innerHTML = '';
+    sourcesList.innerHTML = '';
+
+    // Add status display
+    const statusElement = document.createElement('div');
+    statusElement.className = 'status-message';
+    statusElement.textContent = 'Starting search...';
+    stepsContainer.appendChild(statusElement);
+
+    // Initialize report container
+    reportElement.innerHTML = '<div class="report-loading">Generating report...</div>';
 
     try {
-        // Get the selected search provider
-        const searchProvider = searchProviderSelect.value;
-
-        // Create headers with search provider preference and Bearer token
+        // Create headers with Bearer token authentication only
         const headers = {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`,  // Use Bearer token authentication
-            'X-Search-Provider': searchProvider
+            'Authorization': `Bearer ${apiKey}`  // Use Bearer token authentication
         };
 
-        const response = await fetch(`${API_BASE_URL}/search`, {
+        // Use the streaming endpoint
+        const response = await fetch(`${API_BASE_URL}/search/stream`, {
             method: 'POST',
             headers: headers,
             body: JSON.stringify({ prompt })
@@ -105,25 +118,204 @@ async function handleSearch(event) {
             throw new Error('Search request failed');
         }
 
-        const data = await response.json();
+        // Process the streaming response
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let reportContent = '';
+        let searchSteps = [];
+        let sources = [];
 
-        // Add the search provider info to the results display
-        data.searchProvider = searchProvider;
-        displayResults(data);
+        // Hide the spinner but keep the results section visible
+        loadingElement.style.display = 'none';
+
+        while (true) {
+            const { done, value } = await reader.read();
+
+            if (done) {
+                break;
+            }
+
+            // Decode the chunk and add it to our buffer
+            buffer += decoder.decode(value, { stream: true });
+
+            // Process complete lines in the buffer
+            let lineEnd;
+            while ((lineEnd = buffer.indexOf('\n')) >= 0) {
+                const line = buffer.slice(0, lineEnd);
+                buffer = buffer.slice(lineEnd + 1);
+
+                if (line.trim() === '') continue;
+
+                try {
+                    const event = JSON.parse(line);
+                    processStreamEvent(event, statusElement);
+
+                    // Collect data for final display
+                    if (event.event === 'report_chunk') {
+                        reportContent += event.data.content;
+                        updateReportDisplay(reportContent);
+                    } else if (event.event === 'search_query') {
+                        // Add to search steps
+                        const step = {
+                            query: event.data.query,
+                            sufficient: false,
+                            reasoning: 'Processing...'
+                        };
+                        searchSteps.push(step);
+                        updateSearchStepsDisplay(searchSteps);
+                    } else if (event.event === 'evaluation') {
+                        // Update the corresponding search step
+                        const stepIndex = searchSteps.findIndex(s => s.query === event.data.query);
+                        if (stepIndex >= 0) {
+                            searchSteps[stepIndex].sufficient = event.data.sufficient;
+                            searchSteps[stepIndex].reasoning = event.data.reasoning;
+                            updateSearchStepsDisplay(searchSteps);
+                        }
+                    } else if (event.event === 'sources') {
+                        sources = event.data.sources;
+                        updateSourcesDisplay(sources);
+                    }
+                } catch (e) {
+                    console.error('Error parsing stream event:', e, line);
+                }
+            }
+        }
+
+        // Process any remaining data in the buffer
+        if (buffer.trim()) {
+            try {
+                const event = JSON.parse(buffer);
+                processStreamEvent(event, statusElement);
+            } catch (e) {
+                console.error('Error parsing final stream event:', e, buffer);
+            }
+        }
+
+        // Final update of the report with proper formatting
+        if (reportContent) {
+            updateReportDisplay(reportContent, true);
+        }
+
     } catch (error) {
         console.error('Search error:', error);
-        alert(`Error: ${error.message || 'Failed to perform search'}`);
-        resultsSection.style.display = 'none';
+        reportElement.innerHTML = `<div class="error">Error: ${error.message || 'Failed to perform search'}</div>`;
+        statusElement.textContent = `Error: ${error.message || 'Failed to perform search'}`;
+        statusElement.className = 'status-message error';
     } finally {
         loadingElement.style.display = 'none';
     }
 }
 
+// Process streaming events
+function processStreamEvent(event, statusElement) {
+    console.log('Stream event:', event.event, event.data);
+
+    switch (event.event) {
+        case 'search_start':
+            statusElement.textContent = 'Search started...';
+            break;
+
+        case 'status':
+            statusElement.textContent = event.data.message;
+            break;
+
+        case 'decomposed_queries':
+            statusElement.textContent = `Decomposed into ${event.data.queries.length} search queries`;
+            // Display the queries
+            const queriesElement = document.createElement('div');
+            queriesElement.className = 'decomposed-queries';
+            queriesElement.innerHTML = '<h4>Search Queries:</h4><ul>' +
+                event.data.queries.map(q => `<li>${escapeHTML(q)}</li>`).join('') +
+                '</ul>';
+            stepsContainer.appendChild(queriesElement);
+            break;
+
+        case 'search_query':
+            statusElement.textContent = `Searching for: ${event.data.query}`;
+            break;
+
+        case 'search_results':
+            statusElement.textContent = `Found ${event.data.count} results for: ${event.data.query}`;
+            break;
+
+        case 'summarize_progress':
+            statusElement.textContent = `Summarizing result ${event.data.current}/${event.data.total} for query: ${event.data.query}`;
+            break;
+
+        case 'summarize_complete':
+            statusElement.textContent = `Completed summarizing ${event.data.count} results for: ${event.data.query}`;
+            break;
+
+        case 'no_results':
+            statusElement.textContent = `No results found for query: ${event.data.query}`;
+            break;
+
+        case 'error':
+            statusElement.textContent = `Error: ${event.data.message}`;
+            statusElement.className = 'status-message error';
+            break;
+
+        case 'search_complete':
+            statusElement.textContent = 'Search completed';
+            statusElement.className = 'status-message success';
+            break;
+    }
+}
+
+// Update the report display with streaming content
+function updateReportDisplay(content, final = false) {
+    if (final) {
+        // Final update with full markdown formatting
+        reportElement.innerHTML = formatMarkdown(content);
+    } else {
+        // Streaming update with basic formatting
+        reportElement.innerHTML = `<div class="streaming-report">${content.replace(/\n/g, '<br>')}</div>`;
+    }
+
+    // Scroll to the bottom of the report
+    reportElement.scrollTop = reportElement.scrollHeight;
+}
+
+// Update the search steps display
+function updateSearchStepsDisplay(steps) {
+    stepsContainer.querySelectorAll('.step').forEach(el => el.remove());
+
+    steps.forEach(step => {
+        const stepElement = document.createElement('div');
+        stepElement.className = 'step';
+
+        const sufficientClass = step.sufficient ? 'sufficient-true' : 'sufficient-false';
+        const sufficientText = step.sufficient ? 'Sufficient' : 'Insufficient';
+
+        stepElement.innerHTML = `
+            <div class="step-query">
+                Query: ${escapeHTML(step.query)}
+                <span class="step-sufficient ${sufficientClass}">${sufficientText}</span>
+            </div>
+            <div class="step-reasoning">${escapeHTML(step.reasoning)}</div>
+        `;
+
+        stepsContainer.appendChild(stepElement);
+    });
+}
+
+// Update the sources display
+function updateSourcesDisplay(sources) {
+    sourcesList.innerHTML = '';
+    sources.forEach(source => {
+        const sourceItem = document.createElement('li');
+        sourceItem.innerHTML = `
+            <a href="${escapeHTML(source.link)}" target="_blank">${escapeHTML(source.title)}</a>
+            <p>${escapeHTML(source.snippet || source.summary || '')}</p>
+        `;
+        sourcesList.appendChild(sourceItem);
+    });
+}
+
 function displayResults(data) {
-    // Display the final report with search provider info
-    const providerInfo = data.searchProvider ?
-        `<div class="search-provider-info">Search Provider: <strong>${data.searchProvider}</strong></div>` : '';
-    reportElement.innerHTML = providerInfo + formatMarkdown(data.final_report);
+    // Display the final report
+    reportElement.innerHTML = formatMarkdown(data.final_report);
 
     // Display search steps
     stepsContainer.innerHTML = '';
@@ -169,6 +361,8 @@ function escapeHTML(str) {
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#039;');
 }
+
+
 
 function formatMarkdown(text) {
     // Very simple markdown formatting

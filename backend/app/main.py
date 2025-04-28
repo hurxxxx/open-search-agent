@@ -36,26 +36,22 @@ def custom_openapi():
 
     # Add security schemes
     openapi_schema["components"]["securitySchemes"] = {
-        "OAuth2PasswordBearer": {
-            "type": "oauth2",
-            "flows": {
-                "password": {
-                    "tokenUrl": f"{settings.API_V1_STR}/auth/login",
-                    "scopes": {}
-                }
-            }
+        "BearerAuth": {
+            "type": "http",
+            "scheme": "bearer",
+            "bearerFormat": "API Key"
         }
     }
 
-    # Add security requirement to all endpoints except /auth/login and /health
+    # Add security requirement to all endpoints except /health
     for path in openapi_schema["paths"]:
-        if not path.endswith("/auth/login") and not path.endswith("/health"):
+        if not path.endswith("/health"):
             # Check each HTTP method (GET, POST, PUT, etc.)
             for method in openapi_schema["paths"][path]:
                 if method.lower() in ["get", "post", "put", "delete", "patch"]:
                     # Add security requirement to this method
                     openapi_schema["paths"][path][method]["security"] = [
-                        {"OAuth2PasswordBearer": []}
+                        {"BearerAuth": []}
                     ]
 
     app.openapi_schema = openapi_schema

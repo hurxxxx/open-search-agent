@@ -1,6 +1,6 @@
 // Configuration
 const API_BASE_URL = 'http://localhost:8000/api/v1';
-let authToken = '';
+let apiKey = 'test_api_key_123'; // Default API key matching the one in backend/.env
 
 // DOM Elements
 const searchForm = document.getElementById('search-form');
@@ -11,6 +11,9 @@ const loginButton = document.getElementById('login-button');
 const usernameInput = document.getElementById('username');
 const passwordInput = document.getElementById('password');
 const authStatus = document.getElementById('auth-status');
+const apiKeyInput = document.getElementById('api-key');
+const saveApiKeyButton = document.getElementById('save-api-key-button');
+const apiKeyStatus = document.getElementById('api-key-status');
 const resultsSection = document.getElementById('results-section');
 const loadingElement = document.getElementById('loading');
 const resultsElement = document.getElementById('results');
@@ -21,96 +24,42 @@ const sourcesList = document.getElementById('sources-list');
 // Event Listeners
 document.addEventListener('DOMContentLoaded', () => {
     searchForm.addEventListener('submit', handleSearch);
-    loginButton.addEventListener('click', handleLogin);
+    saveApiKeyButton.addEventListener('click', handleSaveApiKey);
 
-    // Check if we have a token in localStorage
-    const savedToken = localStorage.getItem('authToken');
-    if (savedToken) {
-        authToken = savedToken;
-        updateAuthStatus(true);
-    } else {
-        // Auto login for testing purposes
-        autoLogin();
+    // Check if we have an API key in localStorage
+    const savedApiKey = localStorage.getItem('apiKey');
+    if (savedApiKey) {
+        apiKey = savedApiKey;
+        apiKeyInput.value = apiKey;
+        updateApiKeyStatus(true);
     }
 });
 
-// Auto login function for testing
-async function autoLogin() {
-    try {
-        const formData = new FormData();
-        formData.append('username', 'admin');
-        formData.append('password', 'password');
+// API Key Functions
+function handleSaveApiKey() {
+    const newApiKey = apiKeyInput.value.trim();
 
-        const response = await fetch(`${API_BASE_URL}/auth/login`, {
-            method: 'POST',
-            body: formData
-        });
-
-        if (!response.ok) {
-            throw new Error('Auto authentication failed');
-        }
-
-        const data = await response.json();
-        authToken = data.access_token;
-
-        // Save token to localStorage
-        localStorage.setItem('authToken', authToken);
-
-        updateAuthStatus(true, 'Auto authentication successful');
-    } catch (error) {
-        console.error('Auto login error:', error);
-        updateAuthStatus(false, 'Auto login failed. Please login manually.');
-    }
-}
-
-// Authentication Functions
-async function handleLogin() {
-    const username = usernameInput.value.trim();
-    const password = passwordInput.value.trim();
-
-    if (!username || !password) {
-        updateAuthStatus(false, 'Username and password are required');
+    if (!newApiKey) {
+        updateApiKeyStatus(false, 'API key cannot be empty');
         return;
     }
 
-    try {
-        const formData = new FormData();
-        formData.append('username', username);
-        formData.append('password', password);
-
-        const response = await fetch(`${API_BASE_URL}/auth/login`, {
-            method: 'POST',
-            body: formData
-        });
-
-        if (!response.ok) {
-            throw new Error('Authentication failed');
-        }
-
-        const data = await response.json();
-        authToken = data.access_token;
-
-        // Save token to localStorage
-        localStorage.setItem('authToken', authToken);
-
-        updateAuthStatus(true, 'Authentication successful');
-    } catch (error) {
-        console.error('Login error:', error);
-        updateAuthStatus(false, error.message || 'Authentication failed');
-    }
+    // Save the API key
+    apiKey = newApiKey;
+    localStorage.setItem('apiKey', apiKey);
+    updateApiKeyStatus(true, 'API key saved successfully');
 }
 
-function updateAuthStatus(isSuccess, message = '') {
-    authStatus.textContent = message || (isSuccess ? 'Authenticated' : 'Not authenticated');
-    authStatus.className = isSuccess ? 'auth-success' : 'auth-error';
+function updateApiKeyStatus(isSuccess, message = '') {
+    apiKeyStatus.textContent = message || (isSuccess ? 'API key is set' : 'API key is not set');
+    apiKeyStatus.className = isSuccess ? 'auth-success' : 'auth-error';
 
-    // Update UI based on auth status
+    // Update UI based on API key status
     if (isSuccess) {
-        loginButton.textContent = 'Logged In';
-        loginButton.disabled = true;
-    } else {
-        loginButton.textContent = 'Login';
-        loginButton.disabled = false;
+        saveApiKeyButton.textContent = 'API Key Saved';
+        setTimeout(() => {
+            saveApiKeyButton.textContent = 'Save API Key';
+        }, 2000);
     }
 }
 
@@ -124,8 +73,9 @@ async function handleSearch(event) {
         return;
     }
 
-    if (!authToken) {
-        alert('Please login first');
+    // If API key is not available, require it
+    if (!apiKey) {
+        alert('Please set an API key first');
         return;
     }
 
@@ -138,10 +88,10 @@ async function handleSearch(event) {
         // Get the selected search provider
         const searchProvider = searchProviderSelect.value;
 
-        // Create headers with search provider preference
+        // Create headers with search provider preference and Bearer token
         const headers = {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${authToken}`,
+            'Authorization': `Bearer ${apiKey}`,  // Use Bearer token authentication
             'X-Search-Provider': searchProvider
         };
 

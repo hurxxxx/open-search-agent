@@ -1,41 +1,41 @@
 from typing import Optional
-from fastapi import Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer
-from jose import JWTError, jwt
-from pydantic import ValidationError
+from fastapi import Depends, HTTPException, status, Header
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from app.core.config import settings
-from app.core.security import TokenData
 from app.services.agent_service import AgentService
 from app.services.llm_service import LLMService
 from app.services.search_service import SearchService
 
-oauth2_scheme = OAuth2PasswordBearer(
-    tokenUrl=f"{settings.API_V1_STR}/auth/login"
-)
+# Simple Bearer token authentication
+security = HTTPBearer(auto_error=False)
 
-# Dependency to get the current user from the token
-async def get_current_user(token: str = Depends(oauth2_scheme)) -> Optional[str]:
+# Authentication dependency
+async def get_auth(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> str:
     """
-    Validate access token and return the username
+    Simple Bearer token authentication
+    Returns "api_user" if authenticated
     """
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-    try:
-        payload = jwt.decode(
-            token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
+    # In debug mode, allow access without authentication
+    if settings.DEBUG:
+        return "debug_user"
+
+    if not credentials:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required. Provide a valid Bearer token.",
+            headers={"WWW-Authenticate": "Bearer"},
         )
-        username: str = payload.get("sub")
-        if username is None:
-            raise credentials_exception
-        token_data = TokenData(username=username)
-    except (JWTError, ValidationError):
-        raise credentials_exception
-    
-    return token_data.username
+
+    # Check if the token matches the API_KEY
+    if credentials.credentials != settings.API_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    return "api_user"
 
 # Service dependencies
 def get_agent_service() -> AgentService:

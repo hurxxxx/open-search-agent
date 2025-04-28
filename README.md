@@ -89,7 +89,21 @@ http://localhost:8000/docs
 
 ## Authentication
 
-The API uses JWT token-based authentication. To get a token:
+The API supports two authentication methods:
+
+### Method 1: API Key Authentication (Recommended)
+
+This is a simple token-based authentication that doesn't require a database:
+
+1. Set the `API_KEY` in your `.env` file
+2. Include the API key in the `X-API-Key` header for your requests:
+   ```
+   X-API-Key: your_api_key_here
+   ```
+
+### Method 2: JWT Authentication (Legacy)
+
+The API also supports JWT token-based authentication:
 
 1. Make a POST request to `/api/v1/auth/login` with username and password
 2. Use the returned token in the Authorization header for subsequent requests:

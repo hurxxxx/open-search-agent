@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     # CORS settings
     BACKEND_CORS_ORIGINS: list[str] = ["*"]
 
+    # API Key Authentication
+    API_KEY: str = os.getenv("API_KEY", "")
+
     # OpenAI settings
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
 
@@ -45,7 +48,7 @@ class Settings(BaseSettings):
     # Debug mode
     DEBUG: bool = os.getenv("DEBUG", "False").lower() == "true"
 
-    @field_validator("OPENAI_API_KEY", "SECRET_KEY")
+    @field_validator("OPENAI_API_KEY", "SECRET_KEY", "API_KEY")
     @classmethod
     def check_not_empty(cls, v: str, info) -> str:
         if not v and not os.getenv("DEBUG", "False").lower() == "true":

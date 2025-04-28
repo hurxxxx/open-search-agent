@@ -35,17 +35,13 @@
                 </form>
             </section>
 
-            <section class="auth-section" style="display: none;">
+            <section class="auth-section">
                 <div class="form-group">
-                    <label for="username">Username</label>
-                    <input type="text" id="username" name="username" value="admin">
+                    <label for="api-key">API Key for Bearer Authentication</label>
+                    <input type="text" id="api-key" name="api-key" placeholder="Enter your API key" value="test_api_key_123">
+                    <button id="save-api-key-button">Save API Key</button>
                 </div>
-                <div class="form-group">
-                    <label for="password">Password</label>
-                    <input type="password" id="password" name="password" value="password">
-                </div>
-                <button id="login-button">Login</button>
-                <div id="auth-status"></div>
+                <div id="api-key-status"></div>
             </section>
 
             <section class="results-section" id="results-section">

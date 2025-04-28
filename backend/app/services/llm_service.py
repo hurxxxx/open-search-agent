@@ -32,15 +32,7 @@ class LLMService:
                 "model": self.model,
                 "messages": messages
             }
-
-            # Add model-specific parameters
-            if self.model.startswith("o4-"):
-                params["max_completion_tokens"] = 500
-                # o4 models don't support temperature parameter
-            else:
-                params["max_tokens"] = 500
-                params["temperature"] = 0.3
-
+            
             response = self.client.chat.completions.create(**params)
 
             # Extract the search queries from the response
@@ -99,14 +91,6 @@ class LLMService:
                 "model": self.model,
                 "messages": messages
             }
-
-            # Add model-specific parameters
-            if self.model.startswith("o4-"):
-                params["max_completion_tokens"] = 1000
-                # o4 models don't support temperature parameter
-            else:
-                params["max_tokens"] = 1000
-                params["temperature"] = 0.3
 
             response = self.client.chat.completions.create(**params)
 
@@ -179,17 +163,14 @@ class LLMService:
             """
 
             # Call the LLM to summarize the result
-            # Use o4-mini for cost efficiency
+            # Use OPENAI_MODEL_LOW for cost efficiency
             params = {
-                "model": "o4-mini",  # Use a smaller model for summarization
+                "model": settings.OPENAI_MODEL_LOW,  # Use a smaller model for summarization
                 "messages": [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ]
             }
-
-            # Add model-specific parameters
-            params["max_completion_tokens"] = 300  # Smaller token limit for summarization
 
             # Make the API call
             response = self.client.chat.completions.create(**params)

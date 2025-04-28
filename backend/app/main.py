@@ -26,14 +26,14 @@ app.include_router(api_router, prefix=settings.API_V1_STR)
 def custom_openapi():
     if app.openapi_schema:
         return app.openapi_schema
-    
+
     openapi_schema = get_openapi(
         title=settings.PROJECT_NAME,
         version="1.0.0",
         description="AI Web Search Agent API",
         routes=app.routes,
     )
-    
+
     # Add security schemes
     openapi_schema["components"]["securitySchemes"] = {
         "OAuth2PasswordBearer": {
@@ -46,14 +46,18 @@ def custom_openapi():
             }
         }
     }
-    
-    # Add security requirement to all endpoints except /auth/login
+
+    # Add security requirement to all endpoints except /auth/login and /health
     for path in openapi_schema["paths"]:
         if not path.endswith("/auth/login") and not path.endswith("/health"):
-            openapi_schema["paths"][path]["post"]["security"] = [
-                {"OAuth2PasswordBearer": []}
-            ]
-    
+            # Check each HTTP method (GET, POST, PUT, etc.)
+            for method in openapi_schema["paths"][path]:
+                if method.lower() in ["get", "post", "put", "delete", "patch"]:
+                    # Add security requirement to this method
+                    openapi_schema["paths"][path][method]["security"] = [
+                        {"OAuth2PasswordBearer": []}
+                    ]
+
     app.openapi_schema = openapi_schema
     return app.openapi_schema
 

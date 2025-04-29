@@ -24,7 +24,7 @@ def print_log(level: str, message: str):
     print(f"[{timestamp}] [{level.upper()}] [Open Search Agent] {message}")
 
 
-class Pipeline:
+class Filter:
     class Valves(BaseModel):
         # List target pipeline ids (models) that this filter will be connected to.
         # If you want to connect this filter to all pipelines, you can set pipelines to ["*"]
@@ -84,7 +84,7 @@ class Pipeline:
     async def call_open_search_agent(self, prompt: str, api_key: str) -> dict:
         """Call the Open-Search-Agent API to process a search query"""
         try:
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=None) as client:
                 headers = {
                     "Content-Type": "application/json",
                     "Authorization": f"Bearer {api_key}"
@@ -94,8 +94,7 @@ class Pipeline:
                 response = await client.post(
                     f"{self.valves.api_url}/search",
                     headers=headers,
-                    json={"prompt": prompt},
-                    timeout=60.0  # 60 seconds timeout
+                    json={"prompt": prompt}
                 )
 
                 if response.status_code == 200:

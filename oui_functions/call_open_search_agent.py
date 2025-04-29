@@ -103,7 +103,16 @@ class Filter:
         try:
             # 검색 시작 시간 기록
             search_start_time = datetime.now()
-            
+
+            # 초기 reasoning 상태 표시 - 태그를 사용하여 reasoning 메시지 형식 지정
+            await event_emitter({
+                "type": "reasoning",
+                "data": {
+                    "content": f"<think>### 검색 시작\n\n**검색어:** {prompt}\n\n검색을 시작합니다...</think>",
+                    "duration": (datetime.now() - search_start_time).total_seconds()
+                }
+            })
+
             # If no event emitter is provided, use the non-streaming search results endpoint
             if event_emitter is None:
                 async with httpx.AsyncClient(timeout=None) as client:
@@ -210,11 +219,11 @@ class Filter:
                                         summary_message += f"**요약:**\n{summarized_result.get('content', '')}\n\n"
                                         summary_message += f"**관련성:** {summarized_result.get('relevance', '알 수 없음')}\n\n"
 
-                                        # Stream the summarized result to the UI using chat:message:delta
+                                        # Stream the summarized result to the UI using chat:message:delta with reasoning tags
                                         await event_emitter({
                                             "type": "reasoning",
                                             "data": {
-                                                "content": summary_message,
+                                                "content": f"<think>{summary_message}</think>",
                                                 "duration": (datetime.now() - search_start_time).total_seconds()
                                             }
                                         })
@@ -273,11 +282,11 @@ class Filter:
                                         if len(results) > 5:
                                             search_results_message += f"\n\n... 그 외 {len(results) - 5}개 결과"
 
-                                        # Stream the search results to the UI using chat:message:delta
+                                        # Stream the search results to the UI using chat:message:delta with reasoning tags
                                         await event_emitter({
                                             "type": "reasoning",
                                             "data": {
-                                                "content": search_results_message,
+                                                "content": f"<think>{search_results_message}</think>",
                                                 "duration": (datetime.now() - search_start_time).total_seconds()
                                             }
                                         })
@@ -302,11 +311,11 @@ class Filter:
                                         eval_message += f"**결과:** {'충분함 ✅' if sufficient else '불충분함 ❌'}\n\n"
                                         eval_message += f"**이유:**\n{reasoning}\n\n"
 
-                                        # Stream the evaluation result to the UI using chat:message:delta
+                                        # Stream the evaluation result to the UI using chat:message:delta with reasoning tags
                                         await event_emitter({
                                             "type": "reasoning",
                                             "data": {
-                                                "content": eval_message,
+                                                "content": f"<think>{eval_message}</think>",
                                                 "duration": (datetime.now() - search_start_time).total_seconds()
                                             }
                                         })
@@ -319,11 +328,11 @@ class Filter:
                                         # Append to the final report
                                         final_results["final_report"] += content
 
-                                        # Stream the report chunk to the UI using chat:message:delta
+                                        # Stream the report chunk to the UI using chat:message:delta with reasoning tags
                                         await event_emitter({
                                             "type": "reasoning",
                                             "data": {
-                                                "content": content,
+                                                "content": f"<think>{content}</think>",
                                                 "duration": (datetime.now() - search_start_time).total_seconds()
                                             }
                                         })
@@ -335,11 +344,11 @@ class Filter:
                                     elif event_type == "search_complete":
                                         print_log("info", "Search and report generation completed")
 
-                                        # Send a completion message
+                                        # Send a completion message with reasoning tags
                                         await event_emitter({
                                             "type": "reasoning",
                                             "data": {
-                                                "content": "\n\n---\n\n**검색 및 보고서 생성이 완료되었습니다.**",
+                                                "content": "<think>\n\n---\n\n**검색 및 보고서 생성이 완료되었습니다.**</think>",
                                                 "duration": (datetime.now() - search_start_time).total_seconds()
                                             }
                                         })
@@ -348,7 +357,7 @@ class Filter:
                                         await event_emitter({
                                             "type": "reasoning",
                                             "data": {
-                                                "content": "",
+                                                "content": "</think>",  # Close the reasoning tag
                                                 "done": True,
                                                 "duration": (datetime.now() - search_start_time).total_seconds()
                                             }

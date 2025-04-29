@@ -9,7 +9,7 @@ requirements: requests
 """
 
 from pydantic import BaseModel, Field
-from typing import Callable, Awaitable, Any, Optional, List
+from typing import Callable, Awaitable, Any, List
 import json
 import httpx
 from datetime import datetime
@@ -81,30 +81,177 @@ class Filter:
                 }
             )
 
-    async def call_open_search_agent(self, prompt: str, api_key: str) -> dict:
-        """Call the Open-Search-Agent API to process a search query"""
+    async def call_open_search_agent(self, prompt: str, api_key: str, event_emitter=None) -> dict:
+        """
+        Call the Open-Search-Agent API to process a search query
+
+        Args:
+            prompt: The search query
+            api_key: The API key for authentication
+            event_emitter: Optional function to emit events to the client
+
+        Returns:
+            The search results as a dictionary
+        """
         try:
-            async with httpx.AsyncClient(timeout=None) as client:
-                headers = {
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {api_key}"
+            # If no event emitter is provided, use the regular search endpoint
+            if event_emitter is None:
+                async with httpx.AsyncClient(timeout=None) as client:
+                    headers = {
+                        "Content-Type": "application/json",
+                        "Authorization": f"Bearer {api_key}"
+                    }
+
+                    # Call the search endpoint
+                    response = await client.post(
+                        f"{self.valves.api_url}/search",
+                        headers=headers,
+                        json={"prompt": prompt}
+                    )
+
+                    if response.status_code == 200:
+                        return response.json()
+                    else:
+                        print_log("error", f"API error: {response.status_code} - {response.text}")
+                        return {
+                            "error": f"API returned status code {response.status_code}",
+                            "details": response.text
+                        }
+            # If an event emitter is provided, use the streaming endpoint
+            else:
+                # Final results to return
+                final_results = {
+                    "original_prompt": prompt,
+                    "search_steps": [],
+                    "final_report": "",
+                    "sources": []
                 }
 
-                # Call the search endpoint
-                response = await client.post(
-                    f"{self.valves.api_url}/search",
-                    headers=headers,
-                    json={"prompt": prompt}
-                )
-
-                if response.status_code == 200:
-                    return response.json()
-                else:
-                    print_log("error", f"API error: {response.status_code} - {response.text}")
-                    return {
-                        "error": f"API returned status code {response.status_code}",
-                        "details": response.text
+                async with httpx.AsyncClient(timeout=None) as client:
+                    headers = {
+                        "Content-Type": "application/json",
+                        "Authorization": f"Bearer {api_key}"
                     }
+
+                    # Call the streaming search endpoint
+                    async with client.stream(
+                        "POST",
+                        f"{self.valves.api_url}/search/stream",
+                        headers=headers,
+                        json={"prompt": prompt}
+                    ) as response:
+                        if response.status_code != 200:
+                            error_text = await response.text()
+                            print_log("error", f"API error: {response.status_code} - {error_text}")
+                            return {
+                                "error": f"API returned status code {response.status_code}",
+                                "details": error_text
+                            }
+
+                        # Process the streaming response
+                        buffer = ""
+                        async for chunk in response.aiter_text():
+                            buffer += chunk
+
+                            # Process complete lines in the buffer
+                            while "\n" in buffer:
+                                line, buffer = buffer.split("\n", 1)
+                                if not line.strip():
+                                    continue
+
+                                try:
+                                    event_data = json.loads(line)
+                                    event_type = event_data.get("event")
+                                    data = event_data.get("data", {})
+
+                                    # Create a user-friendly message based on the event type
+                                    message = ""
+                                    if event_type == "search_start":
+                                        message = f"검색 시작: {data.get('prompt', '')[:50]}..."
+                                    elif event_type == "decomposed_queries":
+                                        queries = data.get("queries", [])
+                                        message = f"검색 쿼리 분해: {len(queries)}개의 쿼리로 분해됨"
+                                    elif event_type == "search_query":
+                                        message = f"검색 중: {data.get('query', '')}"
+                                    elif event_type == "search_results":
+                                        message = f"검색 결과: {data.get('query', '')}에 대해 {data.get('count', 0)}개 결과 발견"
+                                    elif event_type == "summarize_progress":
+                                        message = f"요약 중: {data.get('query', '')}의 결과 {data.get('current', 0)}/{data.get('total', 0)}"
+                                    elif event_type == "summarize_complete":
+                                        message = f"요약 완료: {data.get('query', '')}의 {data.get('count', 0)}개 결과"
+                                    elif event_type == "evaluation":
+                                        message = f"평가: {data.get('query', '')}는 {'충분함' if data.get('sufficient', False) else '불충분함'}"
+                                    elif event_type == "report_chunk":
+                                        message = "보고서 생성 중..."
+                                    elif event_type == "sources":
+                                        message = f"소스 정보: {len(data.get('sources', []))}개 소스 발견"
+                                    elif event_type == "search_complete":
+                                        message = "검색 완료"
+                                    elif event_type == "error":
+                                        message = f"오류: {data.get('message', '')}"
+                                    else:
+                                        message = f"{event_type}: {json.dumps(data, ensure_ascii=False)[:50]}..."
+
+                                    # Forward the event to the client
+                                    await event_emitter({
+                                        "type": "status",
+                                        "data": {
+                                            "description": f"Open Search Agent: {message}",
+                                            "done": event_type == "search_complete"
+                                        }
+                                    })
+
+                                    # Process different event types
+                                    if event_type == "search_start":
+                                        print_log("info", f"Search started for: {data.get('prompt')}")
+
+                                    elif event_type == "decomposed_queries":
+                                        queries = data.get("queries", [])
+                                        print_log("info", f"Decomposed into {len(queries)} queries")
+
+                                    elif event_type == "search_query":
+                                        query = data.get("query", "")
+                                        print_log("info", f"Searching for: {query}")
+
+                                    elif event_type == "search_results":
+                                        count = data.get("count", 0)
+                                        query = data.get("query", "")
+                                        print_log("info", f"Found {count} results for: {query}")
+
+                                    elif event_type == "evaluation":
+                                        query = data.get("query", "")
+                                        sufficient = data.get("sufficient", False)
+                                        print_log("info", f"Evaluation for {query}: {'Sufficient' if sufficient else 'Insufficient'}")
+
+                                        # Add to search steps
+                                        final_results["search_steps"].append({
+                                            "query": query,
+                                            "results": data.get("results", []),
+                                            "sufficient": sufficient,
+                                            "reasoning": data.get("reasoning", "")
+                                        })
+
+                                    elif event_type == "report_chunk":
+                                        final_results["final_report"] += data.get("content", "")
+
+                                    elif event_type == "sources":
+                                        final_results["sources"] = data.get("sources", [])
+                                        print_log("info", f"Received {len(final_results['sources'])} sources")
+
+                                    elif event_type == "search_complete":
+                                        print_log("info", "Search completed")
+
+                                    elif event_type == "error":
+                                        print_log("error", f"Error from Open Search Agent: {data.get('message')}")
+                                        return {"error": data.get("message")}
+
+                                except json.JSONDecodeError:
+                                    print_log("error", f"Failed to parse event: {line}")
+                                except Exception as e:
+                                    print_log("error", f"Error processing event: {str(e)}")
+
+                return final_results
+
         except Exception as e:
             print_log("error", f"Error calling API: {str(e)}")
             return {"error": str(e)}
@@ -113,7 +260,6 @@ class Filter:
         self,
         body: dict,
         __event_emitter__: Callable[[Any], Awaitable[None]],
-        user: Optional[dict] = None,
     ) -> dict:
         """
         Process the incoming chat message and call the Open-Search-Agent API
@@ -121,7 +267,6 @@ class Filter:
         Args:
             body: The request body containing the messages
             __event_emitter__: Function to emit events to the client
-            user: The user information
 
         Returns:
             The modified body with the search results
@@ -153,11 +298,13 @@ class Filter:
                 done=False,
             )
 
-            # Call the Open-Search-Agent API
+            # Call the Open-Search-Agent API with streaming
             try:
+                # Call the API with the event emitter to get streaming updates
                 search_response = await self.call_open_search_agent(
                     prompt=user_message,
-                    api_key=self.valves.api_key
+                    api_key=self.valves.api_key,
+                    event_emitter=__event_emitter__
                 )
 
                 # Check if there was an error
@@ -171,7 +318,6 @@ class Filter:
                     return body
 
                 # Extract the search results
-                original_prompt = search_response.get("original_prompt", "")
                 search_steps = search_response.get("search_steps", [])
                 final_report = search_response.get("final_report", "")
                 sources = search_response.get("sources", [])

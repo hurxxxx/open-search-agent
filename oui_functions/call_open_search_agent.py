@@ -207,12 +207,11 @@ class Filter:
                                         summary_message += f"**요약:**\n{summarized_result.get('content', '')}\n\n"
                                         summary_message += f"**관련성:** {summarized_result.get('relevance', '알 수 없음')}\n\n"
 
-                                        # Stream the summarized result to the UI
+                                        # Stream the summarized result to the UI using chat:completion
                                         await event_emitter({
-                                            "type": "assistant",
+                                            "type": "chat:completion",
                                             "data": {
-                                                "content": summary_message,
-                                                "done": False
+                                                "content": summary_message
                                             }
                                         })
                                     elif event_type == "evaluation":
@@ -270,12 +269,11 @@ class Filter:
                                         if len(results) > 5:
                                             search_results_message += f"\n\n... 그 외 {len(results) - 5}개 결과"
 
-                                        # Stream the search results to the UI
+                                        # Stream the search results to the UI using chat:completion
                                         await event_emitter({
-                                            "type": "assistant",
+                                            "type": "chat:completion",
                                             "data": {
-                                                "content": search_results_message,
-                                                "done": False
+                                                "content": search_results_message
                                             }
                                         })
 
@@ -299,12 +297,11 @@ class Filter:
                                         eval_message += f"**결과:** {'충분함 ✅' if sufficient else '불충분함 ❌'}\n\n"
                                         eval_message += f"**이유:**\n{reasoning}\n\n"
 
-                                        # Stream the evaluation result to the UI
+                                        # Stream the evaluation result to the UI using chat:completion
                                         await event_emitter({
-                                            "type": "assistant",
+                                            "type": "chat:completion",
                                             "data": {
-                                                "content": eval_message,
-                                                "done": False
+                                                "content": eval_message
                                             }
                                         })
 
@@ -316,12 +313,11 @@ class Filter:
                                         # Append to the final report
                                         final_results["final_report"] += content
 
-                                        # Stream the report chunk to the UI
+                                        # Stream the report chunk to the UI using chat:completion
                                         await event_emitter({
-                                            "type": "assistant",
+                                            "type": "chat:completion",
                                             "data": {
-                                                "content": content,
-                                                "done": False
+                                                "content": content
                                             }
                                         })
 
@@ -334,10 +330,9 @@ class Filter:
 
                                         # Send a completion message
                                         await event_emitter({
-                                            "type": "assistant",
+                                            "type": "chat:completion",
                                             "data": {
-                                                "content": "\n\n---\n\n**검색 및 보고서 생성이 완료되었습니다.**",
-                                                "done": False
+                                                "content": "\n\n---\n\n**검색 및 보고서 생성이 완료되었습니다.**"
                                             }
                                         })
 

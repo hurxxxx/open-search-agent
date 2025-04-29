@@ -102,9 +102,9 @@ class Filter:
                         "Authorization": f"Bearer {api_key}"
                     }
 
-                    # Call the search endpoint
+                    # Call the search results endpoint (without final report)
                     response = await client.post(
-                        f"{self.valves.api_url}/search",
+                        f"{self.valves.api_url}/search/results",
                         headers=headers,
                         json={"prompt": prompt}
                     )
@@ -319,25 +319,44 @@ class Filter:
 
                 # Extract the search results
                 search_steps = search_response.get("search_steps", [])
-                final_report = search_response.get("final_report", "")
                 sources = search_response.get("sources", [])
 
                 # Log the search results
                 print_log("info", f"검색 완료: {len(search_steps)} 단계, {len(sources)} 소스")
 
-                # Create a system message with the search results
+                # Create a system message with the search results (without final report)
+                # Format sources in a more readable way
+                formatted_sources = []
+                for i, source in enumerate(sources):
+                    title = source.get("title", "제목 없음")
+                    link = source.get("link", "#")
+                    content = source.get("content", "내용 없음")
+
+                    # Truncate content if too long
+                    if len(content) > 500:
+                        content = content[:500] + "..."
+
+                    formatted_sources.append(f"[{i+1}] {title}\n링크: {link}\n내용: {content}\n")
+
+                formatted_sources_text = "\n".join(formatted_sources)
+
+                # Create a system message with search results
                 system_message = {
                     "role": "system",
                     "content": f"""
-다음은 Open Search Agent를 통해 검색한 결과입니다:
+다음은 Open Search Agent를 통해 검색한 결과입니다. 이 정보를 바탕으로 사용자의 질문에 답변해주세요.
 
-# 검색 보고서
-{final_report}
+# 사용자 질문
+{user_message}
+
+# 검색 쿼리 및 결과
+{', '.join([step.get('query', '') for step in search_steps])}
 
 # 검색 소스
-{json.dumps(sources, ensure_ascii=False, indent=2)}
+{formatted_sources_text}
 
-위 정보를 바탕으로 사용자의 질문에 답변해주세요. 소스 정보를 인용하고 출처를 명시해주세요.
+위 정보를 바탕으로 사용자의 질문에 상세하게 답변해주세요. 소스 정보를 인용하고 출처를 명시해주세요.
+답변은 사용자가 이해하기 쉽게 구조화하고, 필요한 경우 마크다운 형식을 사용하여 가독성을 높여주세요.
 """
                 }
 

@@ -40,3 +40,10 @@ class StreamingSearchResponse(BaseModel):
     """Model for streaming search responses"""
     event: str  # Event type: "search_start", "search_query", "search_results", "report_chunk", "search_complete"
     data: Dict[str, Any]  # Event-specific data
+
+
+class SearchResultsResponse(BaseModel):
+    """Model for search results only (without final report)"""
+    original_prompt: str
+    search_steps: List[AgentSearchStep]
+    sources: List[Dict[str, Any]]

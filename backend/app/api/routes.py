@@ -4,7 +4,7 @@ from typing import Any, Optional, AsyncGenerator
 import json
 import asyncio
 
-from app.models.schemas import SearchQuery, AgentResponse, StreamingSearchResponse
+from app.models.schemas import SearchQuery, AgentResponse, StreamingSearchResponse, SearchResultsResponse
 from app.api.dependencies import get_agent_service, get_auth
 from app.services.agent_service import AgentService
 from app.core.config import settings
@@ -38,7 +38,7 @@ async def search(
     x_search_provider: Optional[str] = Header(None)
 ) -> Any:
     """
-    Process a search query through the AI agent
+    Process a search query through the AI agent and generate a complete report
 
     Optionally accepts X-Search-Provider header to override the default search provider
     Requires Bearer token authentication with the API key
@@ -52,6 +52,35 @@ async def search(
             search_provider_override = x_search_provider.lower()
 
     response = await agent_service.process_prompt(query.prompt, search_provider_override)
+    return response
+
+
+@router.post("/search/results", response_model=SearchResultsResponse)
+async def search_results_only(
+    query: SearchQuery,
+    agent_service: AgentService = Depends(get_agent_service),
+    current_user: str = Depends(get_auth),  # Use Bearer token authentication
+    x_search_provider: Optional[str] = Header(None)
+) -> Any:
+    """
+    Process a search query through the AI agent but return only search results without generating a final report
+
+    This endpoint is optimized for integration with other LLMs that will generate their own reports
+    based on the search results. It saves tokens by not generating a redundant report.
+
+    Optionally accepts X-Search-Provider header to override the default search provider
+    Requires Bearer token authentication with the API key
+    """
+    # Override the search provider if specified in the header
+    search_provider_override = None
+    if x_search_provider:
+        # Validate the search provider
+        valid_providers = ["duckduckgo", "google", "searxng", "tavily", "serper", "brave"]
+        if x_search_provider.lower() in valid_providers:
+            search_provider_override = x_search_provider.lower()
+
+    # Get search results without generating a final report
+    response = await agent_service.process_search_only(query.prompt, search_provider_override)
     return response
 
 

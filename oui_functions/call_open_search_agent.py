@@ -87,10 +87,10 @@ class Filter:
 
         This function uses different endpoints based on whether streaming is needed:
         - Non-streaming: /search/results endpoint
-        - Streaming: /search/results/stream endpoint
+        - Streaming: /search/stream endpoint
 
-        Both endpoints return only search results without generating a final report,
-        allowing the LLM to generate the report based on the raw search data.
+        The streaming endpoint provides real-time updates including search results and report generation.
+        This allows the UI to display both the search process and the final report in real-time.
 
         Args:
             prompt: The search query
@@ -98,7 +98,7 @@ class Filter:
             event_emitter: Optional function to emit events to the client
 
         Returns:
-            The search results as a dictionary
+            The search results and report as a dictionary
         """
         try:
             # If no event emitter is provided, use the non-streaming search results endpoint
@@ -130,7 +130,8 @@ class Filter:
                 final_results = {
                     "original_prompt": prompt,
                     "search_steps": [],
-                    "sources": []
+                    "sources": [],
+                    "final_report": ""  # Store the final report here
                 }
 
                 async with httpx.AsyncClient(timeout=None) as client:
@@ -139,10 +140,10 @@ class Filter:
                         "Authorization": f"Bearer {api_key}"
                     }
 
-                    # Call the streaming search results endpoint (without final report)
+                    # Call the streaming endpoint (with search results and final report)
                     async with client.stream(
                         "POST",
-                        f"{self.valves.api_url}/search/results/stream",
+                        f"{self.valves.api_url}/search/stream",
                         headers=headers,
                         json={"prompt": prompt}
                     ) as response:
@@ -187,12 +188,12 @@ class Filter:
                                         message = f"요약 완료: {data.get('query', '')}의 {data.get('count', 0)}개 결과"
                                     elif event_type == "evaluation":
                                         message = f"평가: {data.get('query', '')}는 {'충분함' if data.get('sufficient', False) else '불충분함'}"
-                                    elif event_type == "report_chunk":
-                                        message = "보고서 생성 중..."
+                                    elif event_type == "report_chunk" or event_type == "report":
+                                        message = "보고서 생성 중... (실시간으로 표시됩니다)"
                                     elif event_type == "sources":
                                         message = f"소스 정보: {len(data.get('sources', []))}개 소스 발견"
                                     elif event_type == "search_complete":
-                                        message = "검색 완료, LLM이 결과를 분석하는 중..."
+                                        message = "검색 및 보고서 생성 완료"
                                     elif event_type == "error":
                                         message = f"오류: {data.get('message', '')}"
                                     else:
@@ -237,17 +238,38 @@ class Filter:
                                             "reasoning": data.get("reasoning", "")
                                         })
 
-                                    elif event_type == "report_chunk":
-                                        # We shouldn't receive report chunks from the /search/results/stream endpoint
-                                        # But if we do, log it and ignore it
-                                        print_log("info", "Received unexpected report chunk (ignoring for LLM processing)")
+                                    elif event_type == "report_chunk" or event_type == "report":
+                                        # Process report chunks and display them in real-time
+                                        content = data.get("content", "")
+                                        print_log("info", f"Received report chunk: {len(content)} characters")
+
+                                        # Append to the final report
+                                        final_results["final_report"] += content
+
+                                        # Stream the report chunk to the UI
+                                        await event_emitter({
+                                            "type": "assistant",
+                                            "data": {
+                                                "content": content,
+                                                "done": False
+                                            }
+                                        })
 
                                     elif event_type == "sources":
                                         final_results["sources"] = data.get("sources", [])
                                         print_log("info", f"Received {len(final_results['sources'])} sources")
 
                                     elif event_type == "search_complete":
-                                        print_log("info", "Search completed")
+                                        print_log("info", "Search and report generation completed")
+
+                                        # Mark the assistant message as complete
+                                        await event_emitter({
+                                            "type": "assistant",
+                                            "data": {
+                                                "content": "",  # Empty content as we've already streamed the report
+                                                "done": True
+                                            }
+                                        })
 
                                     elif event_type == "error":
                                         print_log("error", f"Error from Open Search Agent: {data.get('message')}")
@@ -325,33 +347,58 @@ class Filter:
                     )
                     return body
 
-                # Extract the search results
+                # For non-streaming mode only (streaming mode already displays the report in real-time)
+                # This code will only run if we're using the non-streaming API endpoint
+
+                # Extract the search results and final report
                 search_steps = search_response.get("search_steps", [])
                 sources = search_response.get("sources", [])
+                final_report = search_response.get("final_report", "")
 
                 # Log the search results
-                print_log("info", f"검색 완료: {len(search_steps)} 단계, {len(sources)} 소스")
+                print_log("info", f"검색 완료: {len(search_steps)} 단계, {len(sources)} 소스, 보고서 길이: {len(final_report)} 자")
 
-                # Create a system message with the search results (without final report)
-                # Format sources in a more readable way
-                formatted_sources = []
-                for i, source in enumerate(sources):
-                    title = source.get("title", "제목 없음")
-                    link = source.get("link", "#")
-                    content = source.get("content", "내용 없음")
+                # If we have a final report from the non-streaming API, use it directly
+                if final_report:
+                    # Create an assistant message with the final report
+                    assistant_message = {
+                        "role": "assistant",
+                        "content": final_report
+                    }
 
-                    # Truncate content if too long
-                    if len(content) > 500:
-                        content = content[:500] + "..."
+                    # Create a new message array with the original messages and the assistant message
+                    new_messages = []
 
-                    formatted_sources.append(f"[{i+1}] {title}\n링크: {link}\n내용: {content}\n")
+                    # Add the original messages
+                    for msg in messages:
+                        new_messages.append(msg)
 
-                formatted_sources_text = "\n".join(formatted_sources)
+                    # Add the assistant message
+                    new_messages.append(assistant_message)
 
-                # Create a system message with search results
-                system_message = {
-                    "role": "system",
-                    "content": f"""
+                    # Update the body with the new messages
+                    body["messages"] = new_messages
+                else:
+                    # Fallback to the old method if no final report is available
+                    # Format sources in a more readable way
+                    formatted_sources = []
+                    for i, source in enumerate(sources):
+                        title = source.get("title", "제목 없음")
+                        link = source.get("link", "#")
+                        content = source.get("content", "내용 없음")
+
+                        # Truncate content if too long
+                        if len(content) > 500:
+                            content = content[:500] + "..."
+
+                        formatted_sources.append(f"[{i+1}] {title}\n링크: {link}\n내용: {content}\n")
+
+                    formatted_sources_text = "\n".join(formatted_sources)
+
+                    # Create a system message with search results
+                    system_message = {
+                        "role": "system",
+                        "content": f"""
 다음은 Open Search Agent를 통해 검색한 결과입니다. 이 정보를 바탕으로 사용자의 질문에 답변해주세요.
 
 # 사용자 질문
@@ -366,24 +413,25 @@ class Filter:
 위 정보를 바탕으로 사용자의 질문에 상세하게 답변해주세요. 소스 정보를 인용하고 출처를 명시해주세요.
 답변은 사용자가 이해하기 쉽게 구조화하고, 필요한 경우 마크다운 형식을 사용하여 가독성을 높여주세요.
 """
-                }
+                    }
 
-                # Create a new message array with the system message and the original user message
-                new_messages = [system_message]
+                    # Create a new message array with the system message and the original user message
+                    new_messages = [system_message]
 
-                # Add the original messages (except system messages)
-                for msg in messages:
-                    if msg.get("role") != "system":
-                        new_messages.append(msg)
+                    # Add the original messages (except system messages)
+                    for msg in messages:
+                        if msg.get("role") != "system":
+                            new_messages.append(msg)
 
-                # Update the body with the new messages
-                body["messages"] = new_messages
+                    # Update the body with the new messages
+                    body["messages"] = new_messages
 
                 # Emit completion status
+                # For streaming mode, we've already sent the done=True event in the search_complete handler
                 await self.emit_status(
                     __event_emitter__,
                     level="status",
-                    message="Open Search Agent 검색 완료, LLM이 결과를 분석하여 답변을 생성합니다",
+                    message="Open Search Agent 검색 및 보고서 생성 완료",
                     done=True,
                 )
 

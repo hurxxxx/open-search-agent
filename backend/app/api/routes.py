@@ -115,7 +115,74 @@ async def search_stream(
             }) + "\n"
 
             # Process the prompt with streaming enabled
-            async for event in agent_service.process_prompt_stream(query.prompt, search_provider_override):
+            # Generate full report for this endpoint
+            async for event in agent_service.process_prompt_stream(
+                prompt=query.prompt,
+                search_provider_override=search_provider_override,
+                skip_report=False
+            ):
+                yield json.dumps(event) + "\n"
+
+            # Final event to indicate completion
+            yield json.dumps({
+                "event": "search_complete",
+                "data": {"status": "complete"}
+            }) + "\n"
+
+        except Exception as e:
+            # Send error event
+            yield json.dumps({
+                "event": "error",
+                "data": {"message": str(e)}
+            }) + "\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream"
+    )
+
+
+@router.post("/search/results/stream")
+async def search_results_stream(
+    query: SearchQuery,
+    agent_service: AgentService = Depends(get_agent_service),
+    current_user: str = Depends(get_auth),  # Use Bearer token authentication
+    x_search_provider: Optional[str] = Header(None)
+) -> StreamingResponse:
+    """
+    Process a search query through the AI agent with streaming response, returning only search results
+
+    This endpoint is similar to /search/stream but always skips final report generation.
+    It's optimized for integration with other LLMs that will generate their own reports
+    based on the search results.
+
+    Returns a streaming response with real-time updates on the search progress
+    Optionally accepts X-Search-Provider header to override the default search provider
+    Requires Bearer token authentication with the API key
+    """
+    # Override the search provider if specified in the header
+    search_provider_override = None
+    if x_search_provider:
+        # Validate the search provider
+        valid_providers = ["duckduckgo", "google", "searxng", "tavily", "serper", "brave"]
+        if x_search_provider.lower() in valid_providers:
+            search_provider_override = x_search_provider.lower()
+
+    async def event_generator():
+        try:
+            # Start the streaming process
+            yield json.dumps({
+                "event": "search_start",
+                "data": {"prompt": query.prompt}
+            }) + "\n"
+
+            # Process the prompt with streaming enabled
+            # Always skip report generation for this endpoint
+            async for event in agent_service.process_prompt_stream(
+                prompt=query.prompt,
+                search_provider_override=search_provider_override,
+                skip_report=True  # Always skip report for this endpoint
+            ):
                 yield json.dumps(event) + "\n"
 
             # Final event to indicate completion

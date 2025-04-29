@@ -85,6 +85,13 @@ class Filter:
         """
         Call the Open-Search-Agent API to process a search query
 
+        This function uses different endpoints based on whether streaming is needed:
+        - Non-streaming: /search/results endpoint
+        - Streaming: /search/results/stream endpoint
+
+        Both endpoints return only search results without generating a final report,
+        allowing the LLM to generate the report based on the raw search data.
+
         Args:
             prompt: The search query
             api_key: The API key for authentication
@@ -94,7 +101,7 @@ class Filter:
             The search results as a dictionary
         """
         try:
-            # If no event emitter is provided, use the regular search endpoint
+            # If no event emitter is provided, use the non-streaming search results endpoint
             if event_emitter is None:
                 async with httpx.AsyncClient(timeout=None) as client:
                     headers = {
@@ -123,7 +130,6 @@ class Filter:
                 final_results = {
                     "original_prompt": prompt,
                     "search_steps": [],
-                    "final_report": "",
                     "sources": []
                 }
 
@@ -133,10 +139,10 @@ class Filter:
                         "Authorization": f"Bearer {api_key}"
                     }
 
-                    # Call the streaming search endpoint
+                    # Call the streaming search results endpoint (without final report)
                     async with client.stream(
                         "POST",
-                        f"{self.valves.api_url}/search/stream",
+                        f"{self.valves.api_url}/search/results/stream",
                         headers=headers,
                         json={"prompt": prompt}
                     ) as response:
@@ -186,7 +192,7 @@ class Filter:
                                     elif event_type == "sources":
                                         message = f"소스 정보: {len(data.get('sources', []))}개 소스 발견"
                                     elif event_type == "search_complete":
-                                        message = "검색 완료"
+                                        message = "검색 완료, LLM이 결과를 분석하는 중..."
                                     elif event_type == "error":
                                         message = f"오류: {data.get('message', '')}"
                                     else:
@@ -232,7 +238,9 @@ class Filter:
                                         })
 
                                     elif event_type == "report_chunk":
-                                        final_results["final_report"] += data.get("content", "")
+                                        # We shouldn't receive report chunks from the /search/results/stream endpoint
+                                        # But if we do, log it and ignore it
+                                        print_log("info", "Received unexpected report chunk (ignoring for LLM processing)")
 
                                     elif event_type == "sources":
                                         final_results["sources"] = data.get("sources", [])
@@ -375,7 +383,7 @@ class Filter:
                 await self.emit_status(
                     __event_emitter__,
                     level="status",
-                    message="Open Search Agent 검색 완료",
+                    message="Open Search Agent 검색 완료, LLM이 결과를 분석하여 답변을 생성합니다",
                     done=True,
                 )
 

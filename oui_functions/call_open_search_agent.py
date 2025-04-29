@@ -101,6 +101,9 @@ class Filter:
             The search results and report as a dictionary
         """
         try:
+            # 검색 시작 시간 기록
+            search_start_time = datetime.now()
+            
             # If no event emitter is provided, use the non-streaming search results endpoint
             if event_emitter is None:
                 async with httpx.AsyncClient(timeout=None) as client:
@@ -209,9 +212,10 @@ class Filter:
 
                                         # Stream the summarized result to the UI using chat:message:delta
                                         await event_emitter({
-                                            "type": "chat:message:delta",
+                                            "type": "reasoning",
                                             "data": {
-                                                "content": summary_message + "\n\n"
+                                                "content": summary_message,
+                                                "duration": (datetime.now() - search_start_time).total_seconds()
                                             }
                                         })
                                     elif event_type == "evaluation":
@@ -271,9 +275,10 @@ class Filter:
 
                                         # Stream the search results to the UI using chat:message:delta
                                         await event_emitter({
-                                            "type": "chat:message:delta",
+                                            "type": "reasoning",
                                             "data": {
-                                                "content": search_results_message + "\n\n"
+                                                "content": search_results_message,
+                                                "duration": (datetime.now() - search_start_time).total_seconds()
                                             }
                                         })
 
@@ -299,9 +304,10 @@ class Filter:
 
                                         # Stream the evaluation result to the UI using chat:message:delta
                                         await event_emitter({
-                                            "type": "chat:message:delta",
+                                            "type": "reasoning",
                                             "data": {
-                                                "content": eval_message + "\n\n"
+                                                "content": eval_message,
+                                                "duration": (datetime.now() - search_start_time).total_seconds()
                                             }
                                         })
 
@@ -315,9 +321,10 @@ class Filter:
 
                                         # Stream the report chunk to the UI using chat:message:delta
                                         await event_emitter({
-                                            "type": "chat:message:delta",
+                                            "type": "reasoning",
                                             "data": {
-                                                "content": content
+                                                "content": content,
+                                                "duration": (datetime.now() - search_start_time).total_seconds()
                                             }
                                         })
 
@@ -330,18 +337,20 @@ class Filter:
 
                                         # Send a completion message
                                         await event_emitter({
-                                            "type": "chat:message:delta",
+                                            "type": "reasoning",
                                             "data": {
-                                                "content": "\n\n---\n\n**검색 및 보고서 생성이 완료되었습니다.**"
+                                                "content": "\n\n---\n\n**검색 및 보고서 생성이 완료되었습니다.**",
+                                                "duration": (datetime.now() - search_start_time).total_seconds()
                                             }
                                         })
 
-                                        # Mark the assistant message as complete
+                                        # Mark the reasoning message as complete
                                         await event_emitter({
-                                            "type": "assistant",
+                                            "type": "reasoning",
                                             "data": {
-                                                "content": "",  # Empty content as we've already streamed the report
-                                                "done": True
+                                                "content": "",
+                                                "done": True,
+                                                "duration": (datetime.now() - search_start_time).total_seconds()
                                             }
                                         })
 

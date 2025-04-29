@@ -1,5 +1,5 @@
 // Configuration
-const API_BASE_URL = 'http://localhost:8000/api/v1';
+const API_BASE_URL = 'http://localhost:8000/open-search-agent';
 let apiKey = 'test_api_key_123'; // Default API key matching the one in backend/.env
 // Last updated: 2025-04-28 22:50:00
 

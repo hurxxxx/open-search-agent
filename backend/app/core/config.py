@@ -9,7 +9,7 @@ load_dotenv()
 
 class Settings(BaseSettings):
     # API settings
-    API_V1_STR: str = "/api/v1"
+    API_V1_STR: str = "/open-search-agent"
     PROJECT_NAME: str = "AI Web Search Agent"
 
     # CORS settings

@@ -186,6 +186,35 @@ class Filter:
                                         message = f"요약 중: {data.get('query', '')}의 결과 {data.get('current', 0)}/{data.get('total', 0)}"
                                     elif event_type == "summarize_complete":
                                         message = f"요약 완료: {data.get('query', '')}의 {data.get('count', 0)}개 결과"
+                                    elif event_type == "summarized_result":
+                                        message = f"요약 결과: {data.get('query', '')}의 {data.get('index', 0)}/{data.get('total', 0)} 번째 결과"
+
+                                        # Get the summarized result data
+                                        query = data.get("query", "")
+                                        original_result = data.get("original_result", {})
+                                        summarized_result = data.get("summarized_result", {})
+                                        index = data.get("index", 0)
+                                        total = data.get("total", 0)
+                                        is_additional = data.get("additional", False)
+
+                                        # Format the original result
+                                        title = original_result.get("title", "제목 없음")
+                                        link = original_result.get("link", "#")
+
+                                        # Format the summarized result for display
+                                        summary_message = f"### 검색 결과 요약 ({index}/{total})\n\n"
+                                        summary_message += f"**원본:** [{title}]({link})\n\n"
+                                        summary_message += f"**요약:**\n{summarized_result.get('content', '')}\n\n"
+                                        summary_message += f"**관련성:** {summarized_result.get('relevance', '알 수 없음')}\n\n"
+
+                                        # Stream the summarized result to the UI
+                                        await event_emitter({
+                                            "type": "assistant",
+                                            "data": {
+                                                "content": summary_message,
+                                                "done": False
+                                            }
+                                        })
                                     elif event_type == "evaluation":
                                         message = f"평가: {data.get('query', '')}는 {'충분함' if data.get('sufficient', False) else '불충분함'}"
                                     elif event_type == "report_chunk" or event_type == "report":
@@ -223,11 +252,38 @@ class Filter:
                                     elif event_type == "search_results":
                                         count = data.get("count", 0)
                                         query = data.get("query", "")
+                                        results = data.get("results", [])
+                                        is_additional = data.get("additional", False)
                                         print_log("info", f"Found {count} results for: {query}")
+
+                                        # Format the search results for display
+                                        formatted_results = []
+                                        for i, result in enumerate(results[:5]):  # Limit to first 5 results to avoid overwhelming the UI
+                                            title = result.get("title", "제목 없음")
+                                            link = result.get("link", "#")
+                                            snippet = result.get("snippet", "")
+
+                                            formatted_results.append(f"**[{i+1}] {title}**\n링크: {link}\n{snippet}\n")
+
+                                        # Create a message to display the search results
+                                        search_results_message = f"### 검색 쿼리: {query}\n\n" + "\n".join(formatted_results)
+                                        if len(results) > 5:
+                                            search_results_message += f"\n\n... 그 외 {len(results) - 5}개 결과"
+
+                                        # Stream the search results to the UI
+                                        await event_emitter({
+                                            "type": "assistant",
+                                            "data": {
+                                                "content": search_results_message,
+                                                "done": False
+                                            }
+                                        })
 
                                     elif event_type == "evaluation":
                                         query = data.get("query", "")
                                         sufficient = data.get("sufficient", False)
+                                        reasoning = data.get("reasoning", "")
+                                        is_additional = data.get("additional", False)
                                         print_log("info", f"Evaluation for {query}: {'Sufficient' if sufficient else 'Insufficient'}")
 
                                         # Add to search steps
@@ -235,7 +291,21 @@ class Filter:
                                             "query": query,
                                             "results": data.get("results", []),
                                             "sufficient": sufficient,
-                                            "reasoning": data.get("reasoning", "")
+                                            "reasoning": reasoning
+                                        })
+
+                                        # Format the evaluation result for display
+                                        eval_message = f"### 검색 결과 평가: {query}\n\n"
+                                        eval_message += f"**결과:** {'충분함 ✅' if sufficient else '불충분함 ❌'}\n\n"
+                                        eval_message += f"**이유:**\n{reasoning}\n\n"
+
+                                        # Stream the evaluation result to the UI
+                                        await event_emitter({
+                                            "type": "assistant",
+                                            "data": {
+                                                "content": eval_message,
+                                                "done": False
+                                            }
                                         })
 
                                     elif event_type == "report_chunk" or event_type == "report":
@@ -261,6 +331,15 @@ class Filter:
 
                                     elif event_type == "search_complete":
                                         print_log("info", "Search and report generation completed")
+
+                                        # Send a completion message
+                                        await event_emitter({
+                                            "type": "assistant",
+                                            "data": {
+                                                "content": "\n\n---\n\n**검색 및 보고서 생성이 완료되었습니다.**",
+                                                "done": False
+                                            }
+                                        })
 
                                         # Mark the assistant message as complete
                                         await event_emitter({

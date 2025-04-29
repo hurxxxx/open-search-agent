@@ -77,13 +77,14 @@ class AgentService:
                 results = await search_service.search(query)
                 logger.info(f"Search returned {len(results)} results for query: {query}")
 
-                # Yield search results event
+                # Yield search results event with full results
                 yield {
                     "event": "search_results",
                     "data": {
                         "query": query,
                         "count": len(results),
-                        "results": results[:3]  # Send preview of first 3 results
+                        "results": results,  # Send all results
+                        "step_type": "raw_results"
                     }
                 }
 
@@ -115,6 +116,18 @@ class AgentService:
                         # Use the LLM service to summarize each result
                         summarized_result = self.llm_service.summarize_search_result(prompt, query, result)
                         summarized_results.append(summarized_result)
+
+                        # Yield each summarized result in real-time
+                        yield {
+                            "event": "summarized_result",
+                            "data": {
+                                "query": query,
+                                "original_result": result,
+                                "summarized_result": summarized_result,
+                                "index": j + 1,
+                                "total": len(results)
+                            }
+                        }
 
                     # Replace the original results with summarized ones
                     results = summarized_results
@@ -255,8 +268,9 @@ class AgentService:
                         "data": {
                             "query": query,
                             "count": len(results),
-                            "results": results[:3],  # Send preview of first 3 results
-                            "additional": True
+                            "results": results,  # Send all results
+                            "additional": True,
+                            "step_type": "raw_results"
                         }
                     }
 
@@ -284,6 +298,19 @@ class AgentService:
                             # Use the LLM service to summarize each result
                             summarized_result = self.llm_service.summarize_search_result(prompt, query, result)
                             summarized_results.append(summarized_result)
+
+                            # Yield each summarized result in real-time
+                            yield {
+                                "event": "summarized_result",
+                                "data": {
+                                    "query": query,
+                                    "original_result": result,
+                                    "summarized_result": summarized_result,
+                                    "index": k + 1,
+                                    "total": len(results),
+                                    "additional": True
+                                }
+                            }
 
                         # Replace the original results with summarized ones
                         results = summarized_results

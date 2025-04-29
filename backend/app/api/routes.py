@@ -118,8 +118,7 @@ async def search_stream(
             # Generate full report for this endpoint
             async for event in agent_service.process_prompt_stream(
                 prompt=query.prompt,
-                search_provider_override=search_provider_override,
-                skip_report=False
+                search_provider_override=search_provider_override
             ):
                 yield json.dumps(event) + "\n"
 
@@ -150,11 +149,11 @@ async def search_results_stream(
     x_search_provider: Optional[str] = Header(None)
 ) -> StreamingResponse:
     """
-    Process a search query through the AI agent with streaming response, returning only search results
+    Process a search query through the AI agent with streaming response, returning search results
 
-    This endpoint is similar to /search/stream but always skips final report generation.
-    It's optimized for integration with other LLMs that will generate their own reports
-    based on the search results.
+    This endpoint is optimized for integration with other LLMs that will generate their own reports
+    based on the search results. The client should filter out report-related events and only use
+    the search results data.
 
     Returns a streaming response with real-time updates on the search progress
     Optionally accepts X-Search-Provider header to override the default search provider
@@ -177,11 +176,10 @@ async def search_results_stream(
             }) + "\n"
 
             # Process the prompt with streaming enabled
-            # Always skip report generation for this endpoint
+            # This endpoint is for search results only, final report will be handled by the client
             async for event in agent_service.process_prompt_stream(
                 prompt=query.prompt,
-                search_provider_override=search_provider_override,
-                skip_report=True  # Always skip report for this endpoint
+                search_provider_override=search_provider_override
             ):
                 yield json.dumps(event) + "\n"
 

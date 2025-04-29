@@ -17,10 +17,15 @@ class AgentService:
         self.search_service = SearchService()
         self.max_search_iterations = 3  # Limit the number of search iterations
 
-    async def process_prompt_stream(self, prompt: str, search_provider_override: Optional[str] = None) -> AsyncGenerator[Dict[str, Any], None]:
+    async def process_prompt_stream(self, prompt: str, search_provider_override: Optional[str] = None, skip_report: bool = False) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Process a user prompt through the search agent workflow with streaming response
         Yields events as they occur for real-time updates
+
+        Args:
+            prompt: The user's search query
+            search_provider_override: Optional override for the search provider
+            skip_report: If True, skip generating the final report (for integration with other LLMs)
         """
         try:
             logger.info(f"Processing prompt with streaming: {prompt}")
@@ -329,50 +334,6 @@ class AgentService:
 
                 iteration += 1
 
-            # Step 4: Generate the final report
-            logger.info(f"Generating final report based on {len(all_search_results)} search steps")
-            yield {
-                "event": "status",
-                "data": {"message": f"Generating final report based on {len(all_search_results)} search steps"}
-            }
-
-            # Check if we have any results at all
-            total_results = sum(len(step.get("results", [])) for step in all_search_results)
-            logger.info(f"Total search results collected: {total_results}")
-
-            if total_results == 0:
-                logger.warning("No search results found for any query")
-                final_report = "No search results were found for your queries. Please try different search terms or a different search provider."
-                yield {
-                    "event": "report",
-                    "data": {"content": final_report}
-                }
-            else:
-                try:
-                    # Use streaming report generation
-                    async for chunk in self.llm_service.generate_report_stream(prompt, all_search_results):
-                        yield {
-                            "event": "report_chunk",
-                            "data": {"content": chunk}
-                        }
-
-                except Exception as report_error:
-                    error_trace = traceback.format_exc()
-                    logger.error(f"Error generating report: {str(report_error)}")
-                    logger.error(f"Traceback: {error_trace}")
-
-                    # 오류 유형에 따른 상세 메시지
-                    if "maximum context length" in str(report_error).lower():
-                        logger.error(f"Context length exceeded. Total results: {total_results}")
-                        error_message = "Error: The search results are too large to process. Please try a more specific query or use fewer search terms."
-                    else:
-                        error_message = f"Error generating report: {str(report_error)}"
-
-                    yield {
-                        "event": "error",
-                        "data": {"message": error_message}
-                    }
-
             # Collect all sources
             sources = []
             for step in all_search_results:
@@ -385,6 +346,60 @@ class AgentService:
                 "event": "sources",
                 "data": {"sources": sources}
             }
+
+            # Check if we should skip report generation
+            if skip_report:
+                logger.info("Skipping report generation as requested (for integration with other LLMs)")
+                yield {
+                    "event": "status",
+                    "data": {"message": "Skipping report generation as requested (for integration with other LLMs)"}
+                }
+            else:
+                # Step 4: Generate the final report
+                logger.info(f"Generating final report based on {len(all_search_results)} search steps")
+                yield {
+                    "event": "status",
+                    "data": {"message": f"Generating final report based on {len(all_search_results)} search steps"}
+                }
+
+                # Check if we have any results at all
+                total_results = sum(len(step.get("results", [])) for step in all_search_results)
+                logger.info(f"Total search results collected: {total_results}")
+
+                if total_results == 0:
+                    logger.warning("No search results found for any query")
+                    final_report = "No search results were found for your queries. Please try different search terms or a different search provider."
+                    yield {
+                        "event": "report",
+                        "data": {"content": final_report}
+                    }
+                else:
+                    try:
+                        # Use streaming report generation
+                        async for chunk in self.llm_service.generate_report_stream(prompt, all_search_results):
+                            yield {
+                                "event": "report_chunk",
+                                "data": {"content": chunk}
+                            }
+
+                    except Exception as report_error:
+                        error_trace = traceback.format_exc()
+                        logger.error(f"Error generating report: {str(report_error)}")
+                        logger.error(f"Traceback: {error_trace}")
+
+                        # 오류 유형에 따른 상세 메시지
+                        if "maximum context length" in str(report_error).lower():
+                            logger.error(f"Context length exceeded. Total results: {total_results}")
+                            error_message = "Error: The search results are too large to process. Please try a more specific query or use fewer search terms."
+                        else:
+                            error_message = f"Error generating report: {str(report_error)}"
+
+                        yield {
+                            "event": "error",
+                            "data": {"message": error_message}
+                        }
+
+
 
         except Exception as e:
             logger.error(f"Error in process_prompt_stream: {str(e)}", exc_info=True)

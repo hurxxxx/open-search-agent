@@ -17,6 +17,7 @@ import traceback
 
 from open_webui.utils.misc import get_last_user_message
 
+
 # 유틸리티 함수
 def print_log(level: str, message: str):
     """로그를 출력하는 함수"""
@@ -81,7 +82,9 @@ class Filter:
                 }
             )
 
-    async def call_open_search_agent(self, prompt: str, api_key: str, event_emitter=None) -> dict:
+    async def call_open_search_agent(
+        self, prompt: str, api_key: str, event_emitter=None
+    ) -> dict:
         """
         Call the Open-Search-Agent API to process a search query
 
@@ -101,39 +104,31 @@ class Filter:
             The search results and report as a dictionary
         """
         try:
-            # 검색 시작 시간 기록
-            search_start_time = datetime.now()
-
-            # 초기 reasoning 상태 표시 - 태그를 사용하여 reasoning 메시지 형식 지정
-            await event_emitter({
-                "type": "chat:completion",
-                "data": {
-                    "content": f"<details type=\"reasoning\" done=\"false\">\n<summary>Thinking…</summary>\n> ### 검색 시작\n>\n> **검색어:** {prompt}\n>\n> 검색을 시작합니다...\n</details>",
-                }
-            })
-
             # If no event emitter is provided, use the non-streaming search results endpoint
             if event_emitter is None:
                 async with httpx.AsyncClient(timeout=None) as client:
                     headers = {
                         "Content-Type": "application/json",
-                        "Authorization": f"Bearer {api_key}"
+                        "Authorization": f"Bearer {api_key}",
                     }
 
                     # Call the search results endpoint (without final report)
                     response = await client.post(
                         f"{self.valves.api_url}/search/results",
                         headers=headers,
-                        json={"prompt": prompt}
+                        json={"prompt": prompt},
                     )
 
                     if response.status_code == 200:
                         return response.json()
                     else:
-                        print_log("error", f"API error: {response.status_code} - {response.text}")
+                        print_log(
+                            "error",
+                            f"API error: {response.status_code} - {response.text}",
+                        )
                         return {
                             "error": f"API returned status code {response.status_code}",
-                            "details": response.text
+                            "details": response.text,
                         }
             # If an event emitter is provided, use the streaming endpoint
             else:
@@ -142,13 +137,13 @@ class Filter:
                     "original_prompt": prompt,
                     "search_steps": [],
                     "sources": [],
-                    "final_report": ""  # Store the final report here
+                    "final_report": "",  # Store the final report here
                 }
 
                 async with httpx.AsyncClient(timeout=None) as client:
                     headers = {
                         "Content-Type": "application/json",
-                        "Authorization": f"Bearer {api_key}"
+                        "Authorization": f"Bearer {api_key}",
                     }
 
                     # Call the streaming endpoint (with search results and final report)
@@ -156,14 +151,17 @@ class Filter:
                         "POST",
                         f"{self.valves.api_url}/search/stream",
                         headers=headers,
-                        json={"prompt": prompt}
+                        json={"prompt": prompt},
                     ) as response:
                         if response.status_code != 200:
                             error_text = await response.text()
-                            print_log("error", f"API error: {response.status_code} - {error_text}")
+                            print_log(
+                                "error",
+                                f"API error: {response.status_code} - {error_text}",
+                            )
                             return {
                                 "error": f"API returned status code {response.status_code}",
-                                "details": error_text
+                                "details": error_text,
                             }
 
                         # Process the streaming response
@@ -202,33 +200,50 @@ class Filter:
 
                                         # Get the summarized result data
                                         query = data.get("query", "")
-                                        original_result = data.get("original_result", {})
-                                        summarized_result = data.get("summarized_result", {})
+                                        original_result = data.get(
+                                            "original_result", {}
+                                        )
+                                        summarized_result = data.get(
+                                            "summarized_result", {}
+                                        )
                                         index = data.get("index", 0)
                                         total = data.get("total", 0)
                                         is_additional = data.get("additional", False)
 
                                         # Format the original result
-                                        title = original_result.get("title", "제목 없음")
+                                        title = original_result.get(
+                                            "title", "제목 없음"
+                                        )
                                         link = original_result.get("link", "#")
 
                                         # Format the summarized result for display
-                                        summary_message = f"### 검색 결과 요약 ({index}/{total})\n\n"
-                                        summary_message += f"**원본:** [{title}]({link})\n\n"
+                                        summary_message = (
+                                            f"### 검색 결과 요약 ({index}/{total})\n\n"
+                                        )
+                                        summary_message += (
+                                            f"**원본:** [{title}]({link})\n\n"
+                                        )
                                         summary_message += f"**요약:**\n{summarized_result.get('content', '')}\n\n"
                                         summary_message += f"**관련성:** {summarized_result.get('relevance', '알 수 없음')}\n\n"
 
-                                        # Stream the summarized result to the UI using chat:completion
-                                        await event_emitter({
-                                            "type": "chat:completion",
-                                            "data": {
-                                                "content": f"<details type=\"reasoning\" done=\"false\">\n<summary>Thinking…</summary>\n> {summary_message}\n</details>"
+                                        # Stream the summarized result to the UI using chat:message:delta
+                                        await event_emitter(
+                                            {
+                                                "type": "chat:message:delta",
+                                                "data": {
+                                                    "content": summary_message + "\n\n"
+                                                },
                                             }
-                                        })
+                                        )
                                     elif event_type == "evaluation":
                                         message = f"평가: {data.get('query', '')}는 {'충분함' if data.get('sufficient', False) else '불충분함'}"
-                                    elif event_type == "report_chunk" or event_type == "report":
-                                        message = "보고서 생성 중... (실시간으로 표시됩니다)"
+                                    elif (
+                                        event_type == "report_chunk"
+                                        or event_type == "report"
+                                    ):
+                                        message = (
+                                            "보고서 생성 중... (실시간으로 표시됩니다)"
+                                        )
                                     elif event_type == "sources":
                                         message = f"소스 정보: {len(data.get('sources', []))}개 소스 발견"
                                     elif event_type == "search_complete":
@@ -239,21 +254,29 @@ class Filter:
                                         message = f"{event_type}: {json.dumps(data, ensure_ascii=False)[:50]}..."
 
                                     # Forward the event to the client
-                                    await event_emitter({
-                                        "type": "status",
-                                        "data": {
-                                            "description": f"Open Search Agent: {message}",
-                                            "done": event_type == "search_complete"
+                                    await event_emitter(
+                                        {
+                                            "type": "status",
+                                            "data": {
+                                                "description": f"Open Search Agent: {message}",
+                                                "done": event_type == "search_complete",
+                                            },
                                         }
-                                    })
+                                    )
 
                                     # Process different event types
                                     if event_type == "search_start":
-                                        print_log("info", f"Search started for: {data.get('prompt')}")
+                                        print_log(
+                                            "info",
+                                            f"Search started for: {data.get('prompt')}",
+                                        )
 
                                     elif event_type == "decomposed_queries":
                                         queries = data.get("queries", [])
-                                        print_log("info", f"Decomposed into {len(queries)} queries")
+                                        print_log(
+                                            "info",
+                                            f"Decomposed into {len(queries)} queries",
+                                        )
 
                                     elif event_type == "search_query":
                                         query = data.get("query", "")
@@ -264,100 +287,151 @@ class Filter:
                                         query = data.get("query", "")
                                         results = data.get("results", [])
                                         is_additional = data.get("additional", False)
-                                        print_log("info", f"Found {count} results for: {query}")
+                                        print_log(
+                                            "info",
+                                            f"Found {count} results for: {query}",
+                                        )
 
                                         # Format the search results for display
                                         formatted_results = []
-                                        for i, result in enumerate(results[:5]):  # Limit to first 5 results to avoid overwhelming the UI
+                                        for i, result in enumerate(
+                                            results[:5]
+                                        ):  # Limit to first 5 results to avoid overwhelming the UI
                                             title = result.get("title", "제목 없음")
                                             link = result.get("link", "#")
                                             snippet = result.get("snippet", "")
 
-                                            formatted_results.append(f"**[{i+1}] {title}**\n링크: {link}\n{snippet}\n")
+                                            formatted_results.append(
+                                                f"**[{i+1}] {title}**\n링크: {link}\n{snippet}\n"
+                                            )
 
                                         # Create a message to display the search results
-                                        search_results_message = f"### 검색 쿼리: {query}\n\n" + "\n".join(formatted_results)
+                                        search_results_message = (
+                                            f"### 검색 쿼리: {query}\n\n"
+                                            + "\n".join(formatted_results)
+                                        )
                                         if len(results) > 5:
                                             search_results_message += f"\n\n... 그 외 {len(results) - 5}개 결과"
 
-                                        # Stream the search results to the UI using chat:completion
-                                        await event_emitter({
-                                            "type": "chat:completion",
-                                            "data": {
-                                                "content": f"<details type=\"reasoning\" done=\"false\">\n<summary>Thinking…</summary>\n> {search_results_message}\n</details>"
+                                        # Stream the search results to the UI using chat:message:delta
+                                        await event_emitter(
+                                            {
+                                                "type": "status",
+                                                "data": {
+                                                    "action": "thinking",
+                                                    "description": "AI is thinking...",
+                                                    "done": False,
+                                                },
                                             }
-                                        })
-
+                                        )
                                     elif event_type == "evaluation":
                                         query = data.get("query", "")
                                         sufficient = data.get("sufficient", False)
                                         reasoning = data.get("reasoning", "")
                                         is_additional = data.get("additional", False)
-                                        print_log("info", f"Evaluation for {query}: {'Sufficient' if sufficient else 'Insufficient'}")
+                                        print_log(
+                                            "info",
+                                            f"Evaluation for {query}: {'Sufficient' if sufficient else 'Insufficient'}",
+                                        )
 
                                         # Add to search steps
-                                        final_results["search_steps"].append({
-                                            "query": query,
-                                            "results": data.get("results", []),
-                                            "sufficient": sufficient,
-                                            "reasoning": reasoning
-                                        })
+                                        final_results["search_steps"].append(
+                                            {
+                                                "query": query,
+                                                "results": data.get("results", []),
+                                                "sufficient": sufficient,
+                                                "reasoning": reasoning,
+                                            }
+                                        )
 
                                         # Format the evaluation result for display
-                                        eval_message = f"### 검색 결과 평가: {query}\n\n"
+                                        eval_message = (
+                                            f"### 검색 결과 평가: {query}\n\n"
+                                        )
                                         eval_message += f"**결과:** {'충분함 ✅' if sufficient else '불충분함 ❌'}\n\n"
                                         eval_message += f"**이유:**\n{reasoning}\n\n"
 
-                                        # Stream the evaluation result to the UI using chat:completion
-                                        await event_emitter({
-                                            "type": "chat:completion",
-                                            "data": {
-                                                "content": f"<details type=\"reasoning\" done=\"false\">\n<summary>Thinking…</summary>\n> {eval_message}\n</details>"
+                                        # Stream the evaluation result to the UI using chat:message:delta
+                                        await event_emitter(
+                                            {
+                                                "type": "chat:message:delta",
+                                                "data": {
+                                                    "content": eval_message + "\n\n"
+                                                },
                                             }
-                                        })
+                                        )
 
-                                    elif event_type == "report_chunk" or event_type == "report":
+                                    elif (
+                                        event_type == "report_chunk"
+                                        or event_type == "report"
+                                    ):
                                         # Process report chunks and display them in real-time
                                         content = data.get("content", "")
-                                        print_log("info", f"Received report chunk: {len(content)} characters")
+                                        print_log(
+                                            "info",
+                                            f"Received report chunk: {len(content)} characters",
+                                        )
 
                                         # Append to the final report
                                         final_results["final_report"] += content
 
-                                        # Stream the report chunk to the UI using chat:completion
-                                        await event_emitter({
-                                            "type": "chat:completion",
-                                            "data": {
-                                                "content": f"<details type=\"reasoning\" done=\"false\">\n<summary>Thinking…</summary>\n> {content}\n</details>"
+                                        # Stream the report chunk to the UI using chat:message:delta
+                                        await event_emitter(
+                                            {
+                                                "type": "chat:message:delta",
+                                                "data": {"content": content},
                                             }
-                                        })
+                                        )
 
                                     elif event_type == "sources":
-                                        final_results["sources"] = data.get("sources", [])
-                                        print_log("info", f"Received {len(final_results['sources'])} sources")
+                                        final_results["sources"] = data.get(
+                                            "sources", []
+                                        )
+                                        print_log(
+                                            "info",
+                                            f"Received {len(final_results['sources'])} sources",
+                                        )
 
                                     elif event_type == "search_complete":
-                                        print_log("info", "Search and report generation completed")
+                                        print_log(
+                                            "info",
+                                            "Search and report generation completed",
+                                        )
 
                                         # Send a completion message
-                                        await event_emitter({
-                                            "type": "chat:completion",
-                                            "data": {
-                                                "content": "<details type=\"reasoning\" done=\"true\" duration=\"" + str(int((datetime.now() - search_start_time).total_seconds())) + "\">\n<summary>Thought for " + str(int((datetime.now() - search_start_time).total_seconds())) + " seconds</summary>\n> \n> ---\n> \n> **검색 및 보고서 생성이 완료되었습니다.**\n</details>"
+                                        await event_emitter(
+                                            {
+                                                "type": "chat:message:delta",
+                                                "data": {
+                                                    "content": "\n\n---\n\n**검색 및 보고서 생성이 완료되었습니다.**"
+                                                },
                                             }
-                                        })
+                                        )
 
-                                        # We don't need this anymore since we're using chat:completion with details tags
-                                        # The done=true attribute in the details tag above marks it as complete
+                                        # Mark the assistant message as complete
+                                        await event_emitter(
+                                            {
+                                                "type": "assistant",
+                                                "data": {
+                                                    "content": "",  # Empty content as we've already streamed the report
+                                                    "done": True,
+                                                },
+                                            }
+                                        )
 
                                     elif event_type == "error":
-                                        print_log("error", f"Error from Open Search Agent: {data.get('message')}")
+                                        print_log(
+                                            "error",
+                                            f"Error from Open Search Agent: {data.get('message')}",
+                                        )
                                         return {"error": data.get("message")}
 
                                 except json.JSONDecodeError:
                                     print_log("error", f"Failed to parse event: {line}")
                                 except Exception as e:
-                                    print_log("error", f"Error processing event: {str(e)}")
+                                    print_log(
+                                        "error", f"Error processing event: {str(e)}"
+                                    )
 
                 return final_results
 
@@ -413,7 +487,7 @@ class Filter:
                 search_response = await self.call_open_search_agent(
                     prompt=user_message,
                     api_key=self.valves.api_key,
-                    event_emitter=__event_emitter__
+                    event_emitter=__event_emitter__,
                 )
 
                 # Check if there was an error
@@ -435,15 +509,15 @@ class Filter:
                 final_report = search_response.get("final_report", "")
 
                 # Log the search results
-                print_log("info", f"검색 완료: {len(search_steps)} 단계, {len(sources)} 소스, 보고서 길이: {len(final_report)} 자")
+                print_log(
+                    "info",
+                    f"검색 완료: {len(search_steps)} 단계, {len(sources)} 소스, 보고서 길이: {len(final_report)} 자",
+                )
 
                 # If we have a final report from the non-streaming API, use it directly
                 if final_report:
                     # Create an assistant message with the final report
-                    assistant_message = {
-                        "role": "assistant",
-                        "content": final_report
-                    }
+                    assistant_message = {"role": "assistant", "content": final_report}
 
                     # Create a new message array with the original messages and the assistant message
                     new_messages = []
@@ -470,7 +544,9 @@ class Filter:
                         if len(content) > 500:
                             content = content[:500] + "..."
 
-                        formatted_sources.append(f"[{i+1}] {title}\n링크: {link}\n내용: {content}\n")
+                        formatted_sources.append(
+                            f"[{i+1}] {title}\n링크: {link}\n내용: {content}\n"
+                        )
 
                     formatted_sources_text = "\n".join(formatted_sources)
 
@@ -491,7 +567,7 @@ class Filter:
 
 위 정보를 바탕으로 사용자의 질문에 상세하게 답변해주세요. 소스 정보를 인용하고 출처를 명시해주세요.
 답변은 사용자가 이해하기 쉽게 구조화하고, 필요한 경우 마크다운 형식을 사용하여 가독성을 높여주세요.
-"""
+""",
                     }
 
                     # Create a new message array with the system message and the original user message
@@ -525,14 +601,15 @@ class Filter:
                 # Return the original body if there was an error
                 return body
 
-
-
         except Exception as e:
             print_log("error", f"필터 처리 중 오류 발생: {str(e)}")
             print_log("error", f"오류 유형: {type(e).__name__}")
 
             # 스택 트레이스 출력
-            print_log("error", f"스택 트레이스: {''.join(traceback.format_tb(e.__traceback__))}")
+            print_log(
+                "error",
+                f"스택 트레이스: {''.join(traceback.format_tb(e.__traceback__))}",
+            )
 
             # 오류 상태 전송
             await self.emit_status(
@@ -543,4 +620,3 @@ class Filter:
             )
 
         return body
-
